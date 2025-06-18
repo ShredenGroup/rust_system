@@ -1,0 +1,75 @@
+# Rust 编译输出
+/target/
+**/target/
+target/
+*.rs.bk
+*.pdb
+
+# Cargo
+Cargo.lock
+
+# 环境变量和配置文件
+.env
+.env.local
+.env.*.local
+
+# IDE 和编辑器
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# 操作系统
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# 日志文件
+*.log
+logs/
+log/
+
+# 临时文件
+*.tmp
+*.temp
+temp/
+tmp/
+
+# 数据库文件
+*.db
+*.sqlite
+*.sqlite3
+
+# 备份文件
+*.bak
+*.backup
+
+# 测试覆盖率
+coverage/
+*.profraw
+
+# 文档生成
+doc/
+docs/target/
+
+# 密钥和证书
+*.pem
+*.key
+*.crt
+*.p12
+*.pfx
+
+# 数据文件
+data/
+*.csv
+*.json
+*.xml
+
+# 缓存
+.cache/
+*.cache
