@@ -73,3 +73,18 @@ data/
 # 缓存
 .cache/
 *.cache
+
+# Python 文件
+*.py
+*.pyc
+*.pyo
+*.pyd
+__pycache__/
+*.py[cod]
+*$py.class
+
+# 测试文件夹
+test/
+tests/
+**/test/
+**/tests/
