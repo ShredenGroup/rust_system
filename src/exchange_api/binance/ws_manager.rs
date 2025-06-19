@@ -1,4 +1,6 @@
-use crate::common::consts::BINANCE_WS;
+use crate::common::config::ws_config::{
+    MarkPriceConfig, KlineConfig, PartialDepthConfig, DiffDepthConfig, ConfigLoader
+};
 use anyhow::Result;
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -6,38 +8,55 @@ use std::time::Duration;
 use tokio::sync::{mpsc, Mutex};
 use tokio::task::JoinHandle;
 
-use super::ws::{BinanceWebSocket, MarkPriceData};
+use super::ws::{BinanceWebSocket, MarkPriceData, DepthUpdateData, KlineData};
 
-#[derive(Debug, Clone)]
-pub struct WebSocketConfig {
-    pub symbol: String,
-    pub interval: String,
-    pub auto_reconnect: bool,
-    pub max_retries: usize,
-    pub retry_delay: Duration,
+/// WebSocket 数据类型
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub enum WebSocketDataType {
+    MarkPrice,      // 标记价格
+    Kline,          // K线数据
+    PartialDepth,   // 部分订单簿深度
+    DiffDepth,      // 订单簿深度差异
 }
 
-impl Default for WebSocketConfig {
-    fn default() -> Self {
-        Self {
-            symbol: "bnbusdt".to_string(),
-            interval: "1s".to_string(),
-            auto_reconnect: true,
-            max_retries: 5,
-            retry_delay: Duration::from_secs(5),
-        }
-    }
+/// WebSocket 消息类型
+#[derive(Debug, Clone)]
+pub enum WebSocketMessage {
+    MarkPrice(MarkPriceData),
+    Kline(KlineData),
+    PartialDepth(DepthUpdateData),
+    DiffDepth(DepthUpdateData),
+}
+
+/// WebSocket 连接信息
+#[derive(Debug, Clone)]
+pub struct ConnectionInfo {
+    pub connection_id: String,
+    pub symbol: String,
+    pub data_type: WebSocketDataType,
+    pub status: ConnectionStatus,
+    pub created_at: std::time::Instant,
+    pub last_message_at: Option<std::time::Instant>,
+    pub tags: Vec<String>,
+}
+
+#[derive(Debug, Clone)]
+pub enum ConnectionStatus {
+    Connecting,
+    Connected,
+    Disconnected,
+    Error(String),
 }
 
 #[derive(Debug, Clone)]
 pub struct WebSocketManager {
     ws_client: BinanceWebSocket,
-    connections: Arc<Mutex<HashMap<String, JoinHandle<()>>>>,
-    message_tx: mpsc::UnboundedSender<MarkPriceData>,
+    connections: Arc<Mutex<HashMap<String, (JoinHandle<()>, ConnectionInfo)>>>,
+    message_tx: mpsc::UnboundedSender<WebSocketMessage>,
 }
 
 impl WebSocketManager {
-    pub fn new(message_tx: mpsc::UnboundedSender<MarkPriceData>) -> Self {
+    pub fn new(message_tx: mpsc::UnboundedSender<WebSocketMessage>) -> Self {
         Self {
             ws_client: BinanceWebSocket::new(),
             connections: Arc::new(Mutex::new(HashMap::new())),
@@ -45,34 +64,102 @@ impl WebSocketManager {
         }
     }
 
-    /// 启动单个 WebSocket 连接
-    pub async fn start_connection(&self, config: WebSocketConfig) -> Result<()> {
-        let connection_id = format!("{}_{}", config.symbol, config.interval);
+    /// 启动标记价格 WebSocket 连接
+    pub async fn start_mark_price(&self, config: MarkPriceConfig) -> Result<()> {
+        let connection_id = format!("mark_price_{}_{}", config.symbol.join("_"), config.interval);
         let message_tx = self.message_tx.clone();
         
         let ws_client = self.ws_client.clone();
         let connections = self.connections.clone();
         let connection_id_clone = connection_id.clone();
         
+        // 克隆配置数据以避免生命周期问题
+        let symbols = config.symbol.clone();
+        let interval = config.interval.clone();
+        let auto_reconnect = config.base.auto_reconnect;
+        let max_retries = config.base.max_retries;
+        let retry_delay = config.base.retry_delay();
+        let tags = config.base.tags.clone();
+        
+        // 创建连接信息
+        let connection_info = ConnectionInfo {
+            connection_id: connection_id.clone(),
+            symbol: symbols.join(","),  // 转换为字符串用于显示
+            data_type: WebSocketDataType::MarkPrice,
+            status: ConnectionStatus::Connecting,
+            created_at: std::time::Instant::now(),
+            last_message_at: None,
+            tags: tags.clone(),
+        };
+        
         let handle = tokio::spawn(async move {
-            let result = if config.auto_reconnect {
-                ws_client
-                    .subscribe_with_reconnect(
-                        &config.symbol,
-                        &config.interval,
-                        message_tx,
-                        config.max_retries,
-                        config.retry_delay,
-                    )
-                    .await
+            let result: Result<(), Box<dyn std::error::Error + Send + Sync>> = if auto_reconnect {
+                // 为每个交易对创建连接
+                for symbol in &symbols {
+                    // 创建专门用于 MarkPriceData 的通道
+                    let (mark_price_tx, mut mark_price_rx) = mpsc::unbounded_channel::<MarkPriceData>();
+                    
+                    // 启动消息转发任务
+                    let message_tx_clone = message_tx.clone();
+                    tokio::spawn(async move {
+                        while let Some(data) = mark_price_rx.recv().await {
+                            if let Err(e) = message_tx_clone.send(WebSocketMessage::MarkPrice(data)) {
+                                eprintln!("Failed to forward mark price message: {}", e);
+                                break;
+                            }
+                        }
+                    });
+                    
+                    let result = ws_client
+                        .subscribe_with_reconnect(
+                            symbol,
+                            &interval,
+                            mark_price_tx,
+                            max_retries,
+                            retry_delay,
+                        )
+                        .await;
+                    
+                    if let Err(e) = result {
+                        eprintln!("Mark price WebSocket connection failed for {}: {}", symbol, e);
+                    }
+                }
+                Ok(())
             } else {
-                ws_client
-                    .subscribe_mark_price(&config.symbol, &config.interval, message_tx)
-                    .await
+                // 为每个交易对创建连接
+                for symbol in &symbols {
+                    // 创建专门用于 MarkPriceData 的通道
+                    let (mark_price_tx, mut mark_price_rx) = mpsc::unbounded_channel::<MarkPriceData>();
+                    
+                    // 启动消息转发任务
+                    let message_tx_clone = message_tx.clone();
+                    tokio::spawn(async move {
+                        while let Some(data) = mark_price_rx.recv().await {
+                            if let Err(e) = message_tx_clone.send(WebSocketMessage::MarkPrice(data)) {
+                                eprintln!("Failed to forward mark price message: {}", e);
+                                break;
+                            }
+                        }
+                    });
+                    
+                    let result = ws_client
+                        .subscribe_mark_price(symbol, &interval, mark_price_tx)
+                        .await;
+                    
+                    if let Err(e) = result {
+                        eprintln!("Mark price WebSocket connection failed for {}: {}", symbol, e);
+                    }
+                }
+                Ok(())
             };
             
             if let Err(e) = result {
-                eprintln!("WebSocket connection failed: {}", e);
+                eprintln!("Mark price WebSocket connection failed: {}", e);
+                // 更新连接状态
+                let mut conns = connections.lock().await;
+                if let Some((_, info)) = conns.get_mut(&connection_id_clone) {
+                    info.status = ConnectionStatus::Error(e.to_string());
+                }
             }
             
             // 从连接映射中移除
@@ -80,27 +167,232 @@ impl WebSocketManager {
             conns.remove(&connection_id_clone);
         });
         
-        // 保存连接句柄
+        // 保存连接句柄和信息
         let mut conns = self.connections.lock().await;
-        conns.insert(connection_id, handle);
+        conns.insert(connection_id, (handle, connection_info));
         
         Ok(())
     }
 
-    /// 启动多个 WebSocket 连接
-    pub async fn start_multiple_connections(&self, configs: Vec<WebSocketConfig>) -> Result<()> {
-        for config in configs {
-            self.start_connection(config).await?;
+    /// 启动 K线数据 WebSocket 连接
+    pub async fn start_kline(&self, config: KlineConfig) -> Result<()> {
+        let connection_id = format!("kline_{}_{}", config.symbol.join("_"), config.interval);
+        let message_tx = self.message_tx.clone();
+        
+        let ws_client = self.ws_client.clone();
+        let connections = self.connections.clone();
+        let connection_id_clone = connection_id.clone();
+        
+        // 克隆配置数据以避免生命周期问题
+        let symbols = config.symbol.clone();
+        let interval = config.interval.clone();
+        let tags = config.base.tags.clone();
+        
+        // 创建连接信息
+        let connection_info = ConnectionInfo {
+            connection_id: connection_id.clone(),
+            symbol: symbols.join(","),  // 转换为字符串用于显示
+            data_type: WebSocketDataType::Kline,
+            status: ConnectionStatus::Connecting,
+            created_at: std::time::Instant::now(),
+            last_message_at: None,
+            tags: tags.clone(),
+        };
+        
+        let handle = tokio::spawn(async move {
+            // 为每个交易对创建连接
+            for symbol in &symbols {
+                // 创建专门用于 KlineData 的通道
+                let (kline_tx, mut kline_rx) = mpsc::unbounded_channel::<KlineData>();
+                
+                // 启动消息转发任务
+                let message_tx_clone = message_tx.clone();
+                tokio::spawn(async move {
+                    while let Some(data) = kline_rx.recv().await {
+                        if let Err(e) = message_tx_clone.send(WebSocketMessage::Kline(data)) {
+                            eprintln!("Failed to forward kline message: {}", e);
+                            break;
+                        }
+                    }
+                });
+                
+                let result = ws_client.subscribe_kline(symbol, &interval, kline_tx).await;
+                
+                if let Err(e) = result {
+                    eprintln!("Kline WebSocket connection failed for {}: {}", symbol, e);
+                }
+            }
+            
+            // 从连接映射中移除
+            let mut conns = connections.lock().await;
+            conns.remove(&connection_id_clone);
+        });
+        
+        // 保存连接句柄和信息
+        let mut conns = self.connections.lock().await;
+        conns.insert(connection_id, (handle, connection_info));
+        
+        Ok(())
+    }
+
+    /// 启动部分订单簿深度 WebSocket 连接
+    pub async fn start_partial_depth(&self, config: PartialDepthConfig) -> Result<()> {
+        let connection_id = format!("partial_depth_{}_{}_{}", config.symbol.join("_"), config.levels, config.interval);
+        let message_tx = self.message_tx.clone();
+        
+        let ws_client = self.ws_client.clone();
+        let connections = self.connections.clone();
+        let connection_id_clone = connection_id.clone();
+        
+        // 克隆配置数据以避免生命周期问题
+        let symbols = config.symbol.clone();
+        let levels = config.levels;
+        let interval = config.interval.clone();
+        let tags = config.base.tags.clone();
+        
+        // 创建连接信息
+        let connection_info = ConnectionInfo {
+            connection_id: connection_id.clone(),
+            symbol: symbols.join(","),  // 转换为字符串用于显示
+            data_type: WebSocketDataType::PartialDepth,
+            status: ConnectionStatus::Connecting,
+            created_at: std::time::Instant::now(),
+            last_message_at: None,
+            tags: tags.clone(),
+        };
+        
+        let handle = tokio::spawn(async move {
+            // 为每个交易对创建连接
+            for symbol in &symbols {
+                // 创建专门用于 DepthUpdateData 的通道
+                let (depth_tx, mut depth_rx) = mpsc::unbounded_channel::<DepthUpdateData>();
+                
+                // 启动消息转发任务
+                let message_tx_clone = message_tx.clone();
+                tokio::spawn(async move {
+                    while let Some(data) = depth_rx.recv().await {
+                        if let Err(e) = message_tx_clone.send(WebSocketMessage::PartialDepth(data)) {
+                            eprintln!("Failed to forward partial depth message: {}", e);
+                            break;
+                        }
+                    }
+                });
+                
+                let result = ws_client.subscribe_depth(symbol, &interval, depth_tx).await;
+                
+                if let Err(e) = result {
+                    eprintln!("Partial depth WebSocket connection failed for {}: {}", symbol, e);
+                }
+            }
+            
+            // 从连接映射中移除
+            let mut conns = connections.lock().await;
+            conns.remove(&connection_id_clone);
+        });
+        
+        // 保存连接句柄和信息
+        let mut conns = self.connections.lock().await;
+        conns.insert(connection_id, (handle, connection_info));
+        
+        Ok(())
+    }
+
+    /// 启动订单簿深度差异 WebSocket 连接
+    pub async fn start_diff_depth(&self, config: DiffDepthConfig) -> Result<()> {
+        let connection_id = format!("diff_depth_{}_{}", config.symbol.join("_"), config.level);
+        let message_tx = self.message_tx.clone();
+        
+        let ws_client = self.ws_client.clone();
+        let connections = self.connections.clone();
+        let connection_id_clone = connection_id.clone();
+        
+        // 克隆配置数据以避免生命周期问题
+        let symbols = config.symbol.clone();
+        let level = config.level;
+        let tags = config.base.tags.clone();
+        
+        // 创建连接信息
+        let connection_info = ConnectionInfo {
+            connection_id: connection_id.clone(),
+            symbol: symbols.join(","),  // 转换为字符串用于显示
+            data_type: WebSocketDataType::DiffDepth,
+            status: ConnectionStatus::Connecting,
+            created_at: std::time::Instant::now(),
+            last_message_at: None,
+            tags: tags.clone(),
+        };
+        
+        let handle = tokio::spawn(async move {
+            // 为每个交易对创建连接
+            for symbol in &symbols {
+                // 创建专门用于 DepthUpdateData 的通道
+                let (depth_tx, mut depth_rx) = mpsc::unbounded_channel::<DepthUpdateData>();
+                
+                // 启动消息转发任务
+                let message_tx_clone = message_tx.clone();
+                tokio::spawn(async move {
+                    while let Some(data) = depth_rx.recv().await {
+                        if let Err(e) = message_tx_clone.send(WebSocketMessage::DiffDepth(data)) {
+                            eprintln!("Failed to forward diff depth message: {}", e);
+                            break;
+                        }
+                    }
+                });
+                
+                // 这里需要根据实际的WebSocket客户端API来调用相应的方法
+                // 暂时使用subscribe_depth作为占位符
+                let result = ws_client.subscribe_depth(symbol, "100ms", depth_tx).await;
+                
+                if let Err(e) = result {
+                    eprintln!("Diff depth WebSocket connection failed for {}: {}", symbol, e);
+                }
+            }
+            
+            // 从连接映射中移除
+            let mut conns = connections.lock().await;
+            conns.remove(&connection_id_clone);
+        });
+        
+        // 保存连接句柄和信息
+        let mut conns = self.connections.lock().await;
+        conns.insert(connection_id, (handle, connection_info));
+        
+        Ok(())
+    }
+
+    /// 从配置文件启动所有连接
+    pub async fn start_from_config(&self, config_path: &str) -> Result<()> {
+        let configs = ConfigLoader::load_from_file(config_path)
+            .map_err(|e| anyhow::anyhow!("Failed to load config: {}", e))?;
+        
+        // 启动标记价格连接
+        for config in configs.mark_price {
+            self.start_mark_price(config).await?;
         }
+        
+        // 启动K线连接
+        for config in configs.kline {
+            self.start_kline(config).await?;
+        }
+        
+        // 启动部分深度连接
+        for config in configs.partial_depth {
+            self.start_partial_depth(config).await?;
+        }
+        
+        // 启动深度差异连接
+        for config in configs.diff_depth {
+            self.start_diff_depth(config).await?;
+        }
+        
         Ok(())
     }
 
     /// 停止指定的连接
-    pub async fn stop_connection(&self, symbol: &str, interval: &str) -> Result<()> {
-        let connection_id = format!("{}_{}", symbol, interval);
+    pub async fn stop_connection(&self, connection_id: &str) -> Result<()> {
         let mut conns = self.connections.lock().await;
         
-        if let Some(handle) = conns.remove(&connection_id) {
+        if let Some((handle, _)) = conns.remove(connection_id) {
             handle.abort();
             println!("Stopped connection: {}", connection_id);
         }
@@ -112,7 +404,7 @@ impl WebSocketManager {
     pub async fn stop_all_connections(&self) -> Result<()> {
         let mut conns = self.connections.lock().await;
         
-        for (connection_id, handle) in conns.drain() {
+        for (connection_id, (handle, _)) in conns.drain() {
             handle.abort();
             println!("Stopped connection: {}", connection_id);
         }
@@ -127,14 +419,56 @@ impl WebSocketManager {
     }
 
     /// 获取活跃连接列表
-    pub async fn list_connections(&self) -> Vec<String> {
+    pub async fn list_connections(&self) -> Vec<ConnectionInfo> {
         let conns = self.connections.lock().await;
-        conns.keys().cloned().collect()
+        conns.values().map(|(_, info)| info.clone()).collect()
+    }
+
+    /// 根据标签获取连接
+    pub async fn get_connections_by_tag(&self, tag: &str) -> Vec<ConnectionInfo> {
+        let conns = self.connections.lock().await;
+        conns.values()
+            .filter_map(|(_, info)| {
+                if info.tags.contains(&tag.to_string()) {
+                    Some(info.clone())
+                } else {
+                    None
+                }
+            })
+            .collect()
+    }
+
+    /// 根据数据类型获取连接
+    pub async fn get_connections_by_type(&self, data_type: &WebSocketDataType) -> Vec<ConnectionInfo> {
+        let conns = self.connections.lock().await;
+        conns.values()
+            .filter_map(|(_, info)| {
+                if &info.data_type == data_type {
+                    Some(info.clone())
+                } else {
+                    None
+                }
+            })
+            .collect()
+    }
+    
+    /// 根据交易对获取连接
+    pub async fn get_connections_by_symbol(&self, symbol: &str) -> Vec<ConnectionInfo> {
+        let conns = self.connections.lock().await;
+        conns.values()
+            .filter_map(|(_, info)| {
+                if info.symbol == symbol {
+                    Some(info.clone())
+                } else {
+                    None
+                }
+            })
+            .collect()
     }
 }
 
 // 便捷的工厂函数
-pub async fn create_websocket_manager() -> Result<(WebSocketManager, mpsc::UnboundedReceiver<MarkPriceData>)> {
+pub async fn create_websocket_manager() -> Result<(WebSocketManager, mpsc::UnboundedReceiver<WebSocketMessage>)> {
     let (tx, rx) = mpsc::unbounded_channel();
     let manager = WebSocketManager::new(tx);
     Ok((manager, rx))
@@ -144,32 +478,26 @@ pub async fn create_websocket_manager() -> Result<(WebSocketManager, mpsc::Unbou
 pub async fn example_usage() -> Result<()> {
     let (manager, mut rx) = create_websocket_manager().await?;
     
-    // 配置连接
-    let configs = vec![
-        WebSocketConfig {
-            symbol: "bnbusdt".to_string(),
-            interval: "1s".to_string(),
-            auto_reconnect: true,
-            max_retries: 5,
-            retry_delay: Duration::from_secs(5),
-        },
-        WebSocketConfig {
-            symbol: "btcusdt".to_string(),
-            interval: "1s".to_string(),
-            auto_reconnect: true,
-            max_retries: 5,
-            retry_delay: Duration::from_secs(5),
-        },
-    ];
-    
-    // 启动连接
-    manager.start_multiple_connections(configs).await?;
+    // 从配置文件启动连接
+    manager.start_from_config("config.toml").await?;
     
     // 处理消息
     tokio::spawn(async move {
         while let Some(data) = rx.recv().await {
-            println!("Received mark price: {:?}", data);
-            // 在这里处理接收到的数据
+            match data {
+                WebSocketMessage::MarkPrice(mark_price) => {
+                    println!("Received mark price: {:?}", mark_price);
+                },
+                WebSocketMessage::Kline(kline) => {
+                    println!("Received kline: {:?}", kline);
+                },
+                WebSocketMessage::PartialDepth(depth) => {
+                    println!("Received partial depth: {:?}", depth);
+                },
+                WebSocketMessage::DiffDepth(depth) => {
+                    println!("Received diff depth: {:?}", depth);
+                },
+            }
         }
     });
     
