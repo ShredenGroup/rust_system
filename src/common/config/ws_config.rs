@@ -113,9 +113,13 @@ pub struct DiffDepthConfigRaw {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct WebSocketConfigsRaw {
     pub base: WebSocketBaseConfig,
+    #[serde(default)]
     pub mark_price: Vec<MarkPriceConfigRaw>,
+    #[serde(default)]
     pub kline: Vec<KlineConfigRaw>,
+    #[serde(default)]
     pub partial_depth: Vec<PartialDepthConfigRaw>,
+    #[serde(default)]
     pub diff_depth: Vec<DiffDepthConfigRaw>,
 }
 

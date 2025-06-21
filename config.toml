@@ -10,34 +10,71 @@ enable_heartbeat = true
 heartbeat_interval_secs = 30
 tags = ["default"]
 
-# 标记价格配置
-[[mark_price]]
-symbol = ["btcusdt"]
-interval = "1s"
-
-[[mark_price]]
-symbol = ["btcusdt", "ethusdt"]
-interval = "1s"
-
-# K线数据配置
+# K线数据配置 - 只测试K线
 [[kline]]
 symbol = ["btcusdt"]
 interval = "1m"
 
-[[kline]]
-symbol = ["btcusdt", "ethusdt"]
-interval = "1h"
+# 其他配置暂时注释掉
+# [[mark_price]]
+# symbol = ["btcusdt"]
+# interval = "1m"
 
-[[partial_depth]]
-symbol = ["turbousdt"]
-levels = 10
-interval = "500ms"
+# [[partial_depth]]
+# symbol = ["btcusdt"]
+# levels = 10
+# interval = "100ms"
 
-# 订单簿深度差异配置
-[[diff_depth]]
-symbol = ["btcusdt"]
-level = 5
+# [[diff_depth]]
+# symbol = ["btcusdt"]
+# level = 5
 
-[[diff_depth]]
-symbol = ["btcusdt", "ethusdt"]
-level = 10
+# 消息处理策略配置
+[processing]
+# 处理模式: "stream" (流处理) 或 "batch" (批处理)
+mode = "batch"
+
+# 批处理配置 (当 mode = "batch" 时生效)
+[batch]
+# 批处理大小 (消息数量)
+batch_size = 100
+# 批处理时间窗口 (毫秒)
+batch_timeout_ms = 1000
+# 最大批处理延迟 (毫秒)
+max_batch_delay_ms = 5000
+
+# 流处理配置 (当 mode = "stream" 时生效)
+[stream]
+# 处理超时时间 (毫秒)
+process_timeout_ms = 100
+# 最大并发处理数
+max_concurrent = 10
+
+# 消费者配置
+[consumers]
+# 计算模块配置
+[consumers.calculation]
+enabled = true
+# 处理模式: "inherit" (继承全局), "stream", "batch"
+mode = "inherit"
+# 批处理大小 (仅当 mode = "batch" 时生效)
+batch_size = 50
+batch_timeout_ms = 500
+
+# 订单模块配置
+[consumers.order]
+enabled = true
+mode = "inherit"
+# 订单模块通常需要实时处理，批处理大小较小
+batch_size = 10
+batch_timeout_ms = 200
+
+# 持久化模块配置
+[consumers.persistence]
+enabled = true
+mode = "batch"  # 持久化通常用批处理
+batch_size = 200
+batch_timeout_ms = 2000
+# 数据库写入配置
+db_batch_size = 500
+db_flush_interval_ms = 5000
