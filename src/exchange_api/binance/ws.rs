@@ -2,12 +2,12 @@ use crate::common::consts::BINANCE_WS;
 use anyhow::Result;
 use futures::StreamExt;
 use serde::{Deserialize, Serialize};
+use serde_json;
 use std::time::Duration;
+use std::time::Instant;
 use tokio::sync::mpsc;
 use tokio_tungstenite::{connect_async, tungstenite::protocol::Message};
 use url::Url;
-use std::time::Instant;
-use serde_json;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MarkPriceData {
@@ -24,29 +24,29 @@ pub struct MarkPriceData {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DepthUpdateData {
     #[serde(rename = "e")]
-    pub event_type: String,  // "depthUpdate"
-    
+    pub event_type: String, // "depthUpdate"
+
     #[serde(rename = "E")]
-    pub event_time: i64,     // Event time
-    
+    pub event_time: i64, // Event time
+
     #[serde(rename = "T")]
     pub transaction_time: i64, // Transaction time
-    
+
     #[serde(rename = "s")]
-    pub symbol: String,      // Symbol
-    
+    pub symbol: String, // Symbol
+
     #[serde(rename = "U")]
     pub first_update_id: i64, // First update ID in event
-    
+
     #[serde(rename = "u")]
     pub final_update_id: i64, // Final update ID in event
-    
+
     #[serde(rename = "pu")]
     pub prev_final_update_id: i64, // Final update Id in last stream
-    
+
     #[serde(rename = "b")]
     pub bids: Vec<[String; 2]>, // Bids to be updated [price, quantity]
-    
+
     #[serde(rename = "a")]
     pub asks: Vec<[String; 2]>, // Asks to be updated [price, quantity]
 }
@@ -54,14 +54,14 @@ pub struct DepthUpdateData {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct KlineData {
     #[serde(rename = "e")]
-    pub event_type: String,  // "kline"
-    
+    pub event_type: String, // "kline"
+
     #[serde(rename = "E")]
-    pub event_time: i64,     // Event time
-    
+    pub event_time: i64, // Event time
+
     #[serde(rename = "s")]
-    pub symbol: String,      // Symbol
-    
+    pub symbol: String, // Symbol
+
     #[serde(rename = "k")]
     pub kline: KlineInfo,
 }
@@ -69,55 +69,55 @@ pub struct KlineData {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct KlineInfo {
     #[serde(rename = "t")]
-    pub start_time: i64,     // Kline start time
-    
+    pub start_time: i64, // Kline start time
+
     #[serde(rename = "T")]
-    pub close_time: i64,     // Kline close time
-    
+    pub close_time: i64, // Kline close time
+
     #[serde(rename = "s")]
-    pub symbol: String,      // Symbol
-    
+    pub symbol: String, // Symbol
+
     #[serde(rename = "i")]
-    pub interval: String,    // Interval
-    
+    pub interval: String, // Interval
+
     #[serde(rename = "f")]
     pub first_trade_id: i64, // First trade ID
-    
+
     #[serde(rename = "L")]
-    pub last_trade_id: i64,  // Last trade ID
-    
+    pub last_trade_id: i64, // Last trade I
+
     #[serde(rename = "o")]
-    pub open_price: String,  // Open price
-    
+    pub open_price: String, // Open price
+
     #[serde(rename = "c")]
     pub close_price: String, // Close price
-    
+
     #[serde(rename = "h")]
-    pub high_price: String,  // High price
-    
+    pub high_price: String, // High price
+
     #[serde(rename = "l")]
-    pub low_price: String,   // Low price
-    
+    pub low_price: String, // Low price
+
     #[serde(rename = "v")]
     pub base_volume: String, // Base asset volume
-    
+
     #[serde(rename = "n")]
-    pub trade_count: i64,    // Number of trades
-    
+    pub trade_count: i64, // Number of trades
+
     #[serde(rename = "x")]
-    pub is_closed: bool,     // Is this kline closed?
-    
+    pub is_closed: bool, // Is this kline closed?
+
     #[serde(rename = "q")]
     pub quote_volume: String, // Quote asset volume
-    
+
     #[serde(rename = "V")]
     pub taker_buy_base_volume: String, // Taker buy base asset volume
-    
+
     #[serde(rename = "Q")]
     pub taker_buy_quote_volume: String, // Taker buy quote asset volume
-    
+
     #[serde(rename = "B")]
-    pub ignore: String,      // Ignore
+    pub ignore: String, // Ignore
 }
 
 #[derive(Debug, Clone)]
@@ -133,7 +133,7 @@ impl BinanceWebSocket {
     }
 
     /// 创建标记价格 WebSocket 连接
-    /// 
+    ///
     /// # Arguments
     /// * `symbol` - 交易对符号，如 "bnbusdt"
     /// * `interval` - 更新间隔，如 "1s", "1m", "5m"
@@ -146,16 +146,16 @@ impl BinanceWebSocket {
     ) -> Result<()> {
         let stream_name = format!("{}@markPrice@{}", symbol, interval);
         let ws_url = format!("{}/{}", self.base_url, stream_name);
-        
+
         println!("Connecting to WebSocket: {}", ws_url);
-        
-        let url = Url::parse(&ws_url)?;
+
+        let url: Url = Url::parse(&ws_url)?;
         let (ws_stream, _) = connect_async(url).await?;
-        
+
         println!("✅ WebSocket connected successfully");
-        
+
         let (_, mut read) = ws_stream.split();
-        
+
         // 处理接收到的消息
         while let Some(msg) = read.next().await {
             match msg? {
@@ -183,12 +183,12 @@ impl BinanceWebSocket {
                 }
             }
         }
-        
+
         Ok(())
     }
 
     /// 订阅订单簿深度数据
-    /// 
+    ///
     /// # Arguments
     /// * `symbol` - 交易对符号，如 "btcusdt"
     /// * `interval` - 更新间隔，如 "250ms", "500ms", "100ms"
@@ -204,18 +204,18 @@ impl BinanceWebSocket {
         } else {
             format!("{}@depth@{}", symbol, interval)
         };
-        
+
         let ws_url = format!("{}/{}", self.base_url, stream_name);
-        
+
         println!("Connecting to Depth WebSocket: {}", ws_url);
-        
+
         let url = Url::parse(&ws_url)?;
         let (ws_stream, _) = connect_async(url).await?;
-        
+
         println!("✅ Depth WebSocket connected successfully");
-        
+
         let (_, mut read) = ws_stream.split();
-        
+
         while let Some(msg) = read.next().await {
             match msg? {
                 Message::Text(text) => {
@@ -239,7 +239,7 @@ impl BinanceWebSocket {
                 _ => {}
             }
         }
-        
+
         Ok(())
     }
 
@@ -254,19 +254,19 @@ impl BinanceWebSocket {
             .iter()
             .map(|symbol| format!("{}@markPrice@{}", symbol, interval))
             .collect();
-        
+
         let combined_stream = stream_names.join("/");
         let ws_url = format!("{}/{}", self.base_url, combined_stream);
-        
+
         println!("Connecting to multiple streams: {}", ws_url);
-        
+
         let url = Url::parse(&ws_url)?;
         let (ws_stream, _) = connect_async(url).await?;
-        
+
         println!("✅ Multiple WebSocket streams connected successfully");
-        
+
         let (_, mut read) = ws_stream.split();
-        
+
         while let Some(msg) = read.next().await {
             match msg? {
                 Message::Text(text) => {
@@ -290,7 +290,7 @@ impl BinanceWebSocket {
                 _ => {}
             }
         }
-        
+
         Ok(())
     }
 
@@ -311,19 +311,19 @@ impl BinanceWebSocket {
                 }
             })
             .collect();
-        
+
         let combined_stream = stream_names.join("/");
         let ws_url = format!("{}/{}", self.base_url, combined_stream);
-        
+
         println!("Connecting to multiple depth streams: {}", ws_url);
-        
+
         let url = Url::parse(&ws_url)?;
         let (ws_stream, _) = connect_async(url).await?;
-        
+
         println!("✅ Multiple depth streams connected successfully");
-        
+
         let (_, mut read) = ws_stream.split();
-        
+
         while let Some(msg) = read.next().await {
             match msg? {
                 Message::Text(text) => {
@@ -347,7 +347,7 @@ impl BinanceWebSocket {
                 _ => {}
             }
         }
-        
+
         Ok(())
     }
 
@@ -361,32 +361,38 @@ impl BinanceWebSocket {
         retry_delay: Duration,
     ) -> Result<()> {
         let mut retry_count = 0;
-        
+
         loop {
-            match self.subscribe_mark_price(symbol, interval, tx.clone()).await {
+            match self
+                .subscribe_mark_price(symbol, interval, tx.clone())
+                .await
+            {
                 Ok(_) => {
                     println!("WebSocket connection completed normally");
                     break;
                 }
                 Err(e) => {
                     retry_count += 1;
-                    eprintln!("WebSocket connection failed (attempt {}/{}): {}", retry_count, max_retries, e);
-                    
+                    eprintln!(
+                        "WebSocket connection failed (attempt {}/{}): {}",
+                        retry_count, max_retries, e
+                    );
+
                     if retry_count >= max_retries {
                         return Err(e);
                     }
-                    
+
                     println!("Retrying in {:?}...", retry_delay);
                     tokio::time::sleep(retry_delay).await;
                 }
             }
         }
-        
+
         Ok(())
     }
 
     /// 订阅 Kline/Candlestick 数据
-    /// 
+    ///
     /// # Arguments
     /// * `symbol` - 交易对符号，如 "btcusdt"
     /// * `interval` - K线间隔，如 "1m", "5m", "1h", "1d"
@@ -399,16 +405,16 @@ impl BinanceWebSocket {
     ) -> Result<()> {
         let stream_name = format!("{}@kline_{}", symbol, interval);
         let ws_url = format!("{}/{}", self.base_url, stream_name);
-        
+
         println!("Connecting to Kline WebSocket: {}", ws_url);
-        
+
         let url = Url::parse(&ws_url)?;
         let (ws_stream, _) = connect_async(url).await?;
-        
+
         println!("✅ Kline WebSocket connected successfully");
-        
+
         let (_, mut read) = ws_stream.split();
-        
+
         while let Some(msg) = read.next().await {
             match msg? {
                 Message::Text(text) => {
@@ -432,7 +438,7 @@ impl BinanceWebSocket {
                 _ => {}
             }
         }
-        
+
         Ok(())
     }
 
@@ -447,19 +453,19 @@ impl BinanceWebSocket {
             .iter()
             .map(|symbol| format!("{}@kline_{}", symbol, interval))
             .collect();
-        
+
         let combined_stream = stream_names.join("/");
         let ws_url = format!("{}/{}", self.base_url, combined_stream);
-        
+
         println!("Connecting to multiple kline streams: {}", ws_url);
-        
+
         let url = Url::parse(&ws_url)?;
         let (ws_stream, _) = connect_async(url).await?;
-        
+
         println!("✅ Multiple kline streams connected successfully");
-        
+
         let (_, mut read) = ws_stream.split();
-        
+
         while let Some(msg) = read.next().await {
             match msg? {
                 Message::Text(text) => {
@@ -483,7 +489,7 @@ impl BinanceWebSocket {
                 _ => {}
             }
         }
-        
+
         Ok(())
     }
 }
@@ -498,28 +504,27 @@ mod tests {
     async fn test_websocket_connection() {
         let ws = BinanceWebSocket::new();
         let (tx, mut rx) = mpsc::unbounded_channel();
-        
+
         // 启动 WebSocket 连接
         let symbol = "bnbusdt";
         let interval = "1s";
-        
-        let ws_handle = tokio::spawn(async move {
-            ws.subscribe_mark_price(symbol, interval, tx).await
-        });
-        
+
+        let ws_handle =
+            tokio::spawn(async move { ws.subscribe_mark_price(symbol, interval, tx).await });
+
         // 接收几条消息
         let mut message_count = 0;
         let max_messages = 5;
-        
+
         while let Some(data) = rx.recv().await {
             println!("Received: {:?}", data);
             message_count += 1;
-            
+
             if message_count >= max_messages {
                 break;
             }
         }
-        
+
         // 等待 WebSocket 任务完成
         let _ = ws_handle.await;
     }
@@ -536,18 +541,18 @@ mod tests {
             interest_rate: "0.0001".to_string(),
             time: 1640995200000,
         };
-        
+
         let iterations = 100_000;
         let start = Instant::now();
-        
+
         for _ in 0..iterations {
             let _json = serde_json::to_string(&data).unwrap();
         }
-        
+
         let elapsed = start.elapsed();
         println!("序列化 {} 次耗时: {:?}", iterations, elapsed);
         println!("平均每次序列化: {:?}", elapsed / iterations);
-        
+
         // 典型结果：每次序列化约 1-5 微秒
     }
 
@@ -564,9 +569,9 @@ mod tests {
             "b": [["200.00", "260.401"]],
             "a": [["2521.13", "37.315"]]
         }"#;
-        
+
         let data: DepthUpdateData = serde_json::from_str(json_str).unwrap();
-        
+
         assert_eq!(data.symbol, "ETHUSDT");
         assert_eq!(data.event_type, "depthUpdate");
         assert_eq!(data.bids.len(), 1);
@@ -577,28 +582,26 @@ mod tests {
     async fn test_depth_websocket_connection() {
         let ws = BinanceWebSocket::new();
         let (tx, mut rx) = mpsc::unbounded_channel();
-        
+
         // 启动深度数据 WebSocket 连接
         let symbol = "btcusdt";
         let interval = "250ms";
-        
-        let ws_handle = tokio::spawn(async move {
-            ws.subscribe_depth(symbol, interval, tx).await
-        });
-        
+
+        let ws_handle = tokio::spawn(async move { ws.subscribe_depth(symbol, interval, tx).await });
+
         // 接收几条消息
         let mut message_count = 0;
         let max_messages = 3;
-        
+
         while let Some(data) = rx.recv().await {
             println!("收到深度数据: {}", data.symbol);
             message_count += 1;
-            
+
             if message_count >= max_messages {
                 break;
             }
         }
-        
+
         // 等待 WebSocket 任务完成
         let _ = ws_handle.await;
     }
@@ -629,9 +632,9 @@ mod tests {
                 "B": "123456"
             }
         }"#;
-        
+
         let data: KlineData = serde_json::from_str(json_str).unwrap();
-        
+
         assert_eq!(data.symbol, "BTCUSDT");
         assert_eq!(data.event_type, "kline");
         assert_eq!(data.kline.interval, "1m");
@@ -646,28 +649,26 @@ mod tests {
     async fn test_kline_websocket_connection() {
         let ws = BinanceWebSocket::new();
         let (tx, mut rx) = mpsc::unbounded_channel();
-        
+
         // 启动 Kline WebSocket 连接
         let symbol = "btcusdt";
         let interval = "1m";
-        
-        let ws_handle = tokio::spawn(async move {
-            ws.subscribe_kline(symbol, interval, tx).await
-        });
-        
+
+        let ws_handle = tokio::spawn(async move { ws.subscribe_kline(symbol, interval, tx).await });
+
         // 接收几条消息
         let mut message_count = 0;
         let max_messages = 3;
-        
+
         while let Some(data) = rx.recv().await {
             println!("收到K线数据: {} - {}", data.symbol, data.kline.interval);
             message_count += 1;
-            
+
             if message_count >= max_messages {
                 break;
             }
         }
-        
+
         // 等待 WebSocket 任务完成
         let _ = ws_handle.await;
     }
@@ -676,28 +677,27 @@ mod tests {
     async fn test_multiple_klines_websocket_connection() {
         let ws = BinanceWebSocket::new();
         let (tx, mut rx) = mpsc::unbounded_channel();
-        
+
         // 启动多个 Kline WebSocket 连接
         let symbols = vec!["btcusdt".to_string(), "ethusdt".to_string()];
         let interval = "5m";
-        
-        let ws_handle = tokio::spawn(async move {
-            ws.subscribe_multiple_klines(&symbols, interval, tx).await
-        });
-        
+
+        let ws_handle =
+            tokio::spawn(async move { ws.subscribe_multiple_klines(&symbols, interval, tx).await });
+
         // 接收几条消息
         let mut message_count = 0;
         let max_messages = 5;
-        
+
         while let Some(data) = rx.recv().await {
             println!("收到多K线数据: {} - {}", data.symbol, data.kline.interval);
             message_count += 1;
-            
+
             if message_count >= max_messages {
                 break;
             }
         }
-        
+
         // 等待 WebSocket 任务完成
         let _ = ws_handle.await;
     }

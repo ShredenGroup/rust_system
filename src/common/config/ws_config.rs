@@ -1,6 +1,11 @@
 use serde::{Deserialize, Serialize};
 use std::time::Duration;
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct BinanceUserConfig{
+    pub api_key:String,
+    pub secret_key:String,
+}
 /// WebSocket 基础配置
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct WebSocketBaseConfig {

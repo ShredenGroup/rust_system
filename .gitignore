@@ -88,3 +88,5 @@ test/
 tests/
 **/test/
 **/tests/
+
+**/bin/

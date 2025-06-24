@@ -3,6 +3,10 @@ name = "rust_system"
 version = "0.1.0"
 edition = "2024"
 
+[lib]
+name = "rust_system"
+path = "src/lib.rs"
+
 [dependencies]
 # Async runtime
 tokio = { version = "1.36", features = ["full"] }
@@ -44,3 +48,8 @@ dotenv = "0.15"
 
 # Async traits
 async-trait = "0.1"
+
+# Crypto
+hmac = "0.12"
+sha2 = "0.10"
+hex = "0.4"
