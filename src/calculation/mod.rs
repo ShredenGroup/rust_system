@@ -1,1 +1,3 @@
-pub mod strategy; 
+pub mod strategy;
+
+pub mod factors;

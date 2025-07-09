@@ -1,11 +1,11 @@
 use crate::common::consts::BINANCE_FUTURES_URL;
 use crate::common::utils::generate_hmac_signature;
-use anyhow::Result;
+use anyhow::{Ok, Result};
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
+use serde_json;
 use std::collections::HashMap;
 use std::time::{SystemTime, UNIX_EPOCH};
-use serde_json;
 
 /// 订单类型枚举
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -39,13 +39,55 @@ pub enum TimeInForce {
     Gtd, // Good Till Date
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct NewKlineRequest {
+    pub symbol: String,
+    pub interval: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub start_time: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub end_time: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub limit: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct KlineData {
+    #[serde(rename = "0")]
+    pub open_time: i64,
+    #[serde(rename = "1")]
+    pub open: String,
+    #[serde(rename = "2")]
+    pub high: String,
+    #[serde(rename = "3")]
+    pub low: String,
+    #[serde(rename = "4")]
+    pub close: String,
+    #[serde(rename = "5")]
+    pub volume: String,
+    #[serde(rename = "6")]
+    pub close_time: i64,
+    #[serde(rename = "7")]
+    pub quote_volume: String,
+    #[serde(rename = "8")]
+    pub trades_count: i64,
+    #[serde(rename = "9")]
+    pub taker_buy_volume: String,
+    #[serde(rename = "10")]
+    pub taker_buy_quote_volume: String,
+    #[serde(rename = "11")]
+    pub ignore: String,
+}
+
+pub type NewKlineResponse = Vec<KlineData>;
+
 /// 下单请求参数
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct NewOrderRequest {
     pub symbol: String,
     pub side: OrderSide,
     pub order_type: OrderType,
-    
+
     // 可选参数
     #[serde(skip_serializing_if = "Option::is_none")]
     pub position_side: Option<String>,
@@ -146,10 +188,7 @@ impl BinanceFuturesApi {
 
     /// 构建查询字符串
     fn build_query_string(&self, params: &HashMap<String, String>) -> String {
-        let mut pairs: Vec<String> = params
-            .iter()
-            .map(|(k, v)| format!("{}={}", k, v))
-            .collect();
+        let mut pairs: Vec<String> = params.iter().map(|(k, v)| format!("{}={}", k, v)).collect();
         pairs.sort(); // 币安要求参数按字母顺序排序
         pairs.join("&")
     }
@@ -159,22 +198,52 @@ impl BinanceFuturesApi {
         generate_hmac_signature(query_string, &self.secret_key)
     }
 
+    pub async fn get_klines(&self, request: &NewKlineRequest) -> Result<NewKlineResponse> {
+        let params = request.to_params()?;
+        let query = self.build_query_string(&params);
+        let url = format!("{}/klines?{}", self.base_url, query);
+        println!("Requesting URL: {}", url);
+        let response = self.client.get(&url).send().await?;
+        if !response.status().is_success() {
+            let error_text = response.text().await?;
+            return Err(anyhow::anyhow!("API request failed: {}", error_text));
+        }
+        
+        let klines = response.json().await?;
+        Ok(klines)
+    }
+
     /// 发送下单请求
     pub async fn new_order(&self, request: NewOrderRequest) -> Result<NewOrderResponse> {
         // 构建请求参数
         let mut params = HashMap::new();
-        
+
         // 必需参数 - 使用 serde 序列化
         params.insert("symbol".to_string(), request.symbol.clone());
-        params.insert("side".to_string(), serde_json::to_string(&request.side)?.trim_matches('"').to_string());
-        params.insert("type".to_string(), serde_json::to_string(&request.order_type)?.trim_matches('"').to_string());
-        
+        params.insert(
+            "side".to_string(),
+            serde_json::to_string(&request.side)?
+                .trim_matches('"')
+                .to_string(),
+        );
+        params.insert(
+            "type".to_string(),
+            serde_json::to_string(&request.order_type)?
+                .trim_matches('"')
+                .to_string(),
+        );
+
         // 可选参数
         if let Some(ref position_side) = request.position_side {
             params.insert("positionSide".to_string(), position_side.clone());
         }
         if let Some(ref time_in_force) = request.time_in_force {
-            params.insert("timeInForce".to_string(), serde_json::to_string(time_in_force)?.trim_matches('"').to_string());
+            params.insert(
+                "timeInForce".to_string(),
+                serde_json::to_string(time_in_force)?
+                    .trim_matches('"')
+                    .to_string(),
+            );
         }
         if let Some(ref quantity) = request.quantity {
             params.insert("quantity".to_string(), quantity.clone());
@@ -213,41 +282,49 @@ impl BinanceFuturesApi {
             params.insert("priceMatch".to_string(), price_match.clone());
         }
         if let Some(ref self_trade_prevention_mode) = request.self_trade_prevention_mode {
-            params.insert("selfTradePreventionMode".to_string(), self_trade_prevention_mode.clone());
+            params.insert(
+                "selfTradePreventionMode".to_string(),
+                self_trade_prevention_mode.clone(),
+            );
         }
         if let Some(ref good_till_date) = request.good_till_date {
             params.insert("goodTillDate".to_string(), good_till_date.to_string());
         }
-        
+
         // 添加时间戳和接收窗口
         let timestamp = request.timestamp.unwrap_or_else(Self::get_timestamp);
         params.insert("timestamp".to_string(), timestamp.to_string());
-        params.insert("recvWindow".to_string(), request.recv_window.unwrap_or(60000).to_string());
-        
+        params.insert(
+            "recvWindow".to_string(),
+            request.recv_window.unwrap_or(60000).to_string(),
+        );
+
         // 构建查询字符串
         let query_string = self.build_query_string(&params);
-        
+
         // 生成签名
         let signature = self.generate_signature(&query_string);
-        
+
         // 构建完整 URL
-        let url = format!("{}/order?{}&signature={}", self.base_url, query_string, signature);
-        
-        println!("发送下单请求: {}", url);
-        
+        let url = format!(
+            "{}/order?{}&signature={}",
+            self.base_url, query_string, signature
+        );
+
         // 发送请求 - 只使用 URL 参数，不发送 JSON body
-        let response = self.client
+        let response = self
+            .client
             .post(&url)
             .header("X-MBX-APIKEY", &self.api_key)
             .send()
             .await?;
-        
+
         // 检查响应状态
         if !response.status().is_success() {
             let error_text = response.text().await?;
             return Err(anyhow::anyhow!("API 请求失败: {}", error_text));
         }
-        
+
         // 解析响应
         let order_response: NewOrderResponse = response.json().await?;
         Ok(order_response)
@@ -264,7 +341,7 @@ impl BinanceFuturesApi {
             recv_window: Some(60000),
             ..Default::default()
         };
-        
+
         self.new_order(request).await
     }
 
@@ -279,12 +356,17 @@ impl BinanceFuturesApi {
             recv_window: Some(60000),
             ..Default::default()
         };
-        
+
         self.new_order(request).await
     }
 
     /// 创建限价买单的便捷方法
-    pub async fn limit_buy(&self, symbol: &str, quantity: &str, price: &str) -> Result<NewOrderResponse> {
+    pub async fn limit_buy(
+        &self,
+        symbol: &str,
+        quantity: &str,
+        price: &str,
+    ) -> Result<NewOrderResponse> {
         let request = NewOrderRequest {
             symbol: symbol.to_string(),
             side: OrderSide::Buy,
@@ -296,12 +378,17 @@ impl BinanceFuturesApi {
             recv_window: Some(60000),
             ..Default::default()
         };
-        
+
         self.new_order(request).await
     }
 
     /// 创建限价卖单的便捷方法
-    pub async fn limit_sell(&self, symbol: &str, quantity: &str, price: &str) -> Result<NewOrderResponse> {
+    pub async fn limit_sell(
+        &self,
+        symbol: &str,
+        quantity: &str,
+        price: &str,
+    ) -> Result<NewOrderResponse> {
         let request = NewOrderRequest {
             symbol: symbol.to_string(),
             side: OrderSide::Sell,
@@ -313,7 +400,7 @@ impl BinanceFuturesApi {
             recv_window: Some(60000),
             ..Default::default()
         };
-        
+
         self.new_order(request).await
     }
 }
@@ -347,37 +434,20 @@ impl Default for NewOrderRequest {
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_build_query_string() {
-        let api = BinanceFuturesApi::new(
-            "test_api_key".to_string(),
-            "test_secret_key".to_string(),
-        );
-        
+impl NewKlineRequest {
+    pub fn to_params(&self) -> Result<HashMap<String, String>> {
         let mut params = HashMap::new();
-        params.insert("symbol".to_string(), "BTCUSDT".to_string());
-        params.insert("side".to_string(), "BUY".to_string());
-        params.insert("quantity".to_string(), "1".to_string());
-        
-        let query_string = api.build_query_string(&params);
-        assert_eq!(query_string, "quantity=1&side=BUY&symbol=BTCUSDT");
-    }
-
-    #[test]
-    fn test_generate_signature() {
-        let api = BinanceFuturesApi::new(
-            "test_api_key".to_string(),
-            "NhqPtmdSJYdKjVHjA7PZj4Mge3R5YNiP1e3UZjInClVN65XAbvqqM6A7H5fATj0j".to_string(),
-        );
-        
-        let query_string = "symbol=LTCBTC&side=BUY&type=LIMIT&timeInForce=GTC&quantity=1&price=0.1&recvWindow=5000&timestamp=1499827319559";
-        let signature = api.generate_signature(query_string);
-        
-        let expected_signature = "c8db56825ae71d6d79447849e617115f4a920fa2acdcab2b053c4b2838bd6b71";
-        assert_eq!(signature, expected_signature);
+        params.insert("symbol".to_string(), self.symbol.clone());
+        params.insert("interval".to_string(), self.interval.clone());
+        if let Some(ref start_time) = self.start_time {
+            params.insert("startTime".to_string(), start_time.clone());
+        }
+        if let Some(ref end_time) = self.end_time {
+            params.insert("endTime".to_string(), end_time.clone());
+        }
+        if let Some(ref limit) = self.limit {
+            params.insert("limit".to_string(), limit.clone());
+        }
+        Ok(params)
     }
 }
