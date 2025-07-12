@@ -1,124 +1,13 @@
 use crate::common::consts::BINANCE_WS;
+use crate::dto::binance::websocket::{MarkPriceData, DepthUpdateData, KlineData};
 use anyhow::Result;
 use futures::StreamExt;
-use serde::{Deserialize, Serialize};
 use serde_json;
 use std::time::Duration;
 use std::time::Instant;
 use tokio::sync::mpsc;
 use tokio_tungstenite::{connect_async, tungstenite::protocol::Message};
 use url::Url;
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct MarkPriceData {
-    pub symbol: String,
-    pub mark_price: String,
-    pub index_price: String,
-    pub estimated_settle_price: String,
-    pub last_funding_rate: String,
-    pub next_funding_time: i64,
-    pub interest_rate: String,
-    pub time: i64,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct DepthUpdateData {
-    #[serde(rename = "e")]
-    pub event_type: String, // "depthUpdate"
-
-    #[serde(rename = "E")]
-    pub event_time: i64, // Event time
-
-    #[serde(rename = "T")]
-    pub transaction_time: i64, // Transaction time
-
-    #[serde(rename = "s")]
-    pub symbol: String, // Symbol
-
-    #[serde(rename = "U")]
-    pub first_update_id: i64, // First update ID in event
-
-    #[serde(rename = "u")]
-    pub final_update_id: i64, // Final update ID in event
-
-    #[serde(rename = "pu")]
-    pub prev_final_update_id: i64, // Final update Id in last stream
-
-    #[serde(rename = "b")]
-    pub bids: Vec<[String; 2]>, // Bids to be updated [price, quantity]
-
-    #[serde(rename = "a")]
-    pub asks: Vec<[String; 2]>, // Asks to be updated [price, quantity]
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct KlineData {
-    #[serde(rename = "e")]
-    pub event_type: String, // "kline"
-
-    #[serde(rename = "E")]
-    pub event_time: i64, // Event time
-
-    #[serde(rename = "s")]
-    pub symbol: String, // Symbol
-
-    #[serde(rename = "k")]
-    pub kline: KlineInfo,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct KlineInfo {
-    #[serde(rename = "t")]
-    pub start_time: i64, // Kline start time
-
-    #[serde(rename = "T")]
-    pub close_time: i64, // Kline close time
-
-    #[serde(rename = "s")]
-    pub symbol: String, // Symbol
-
-    #[serde(rename = "i")]
-    pub interval: String, // Interval
-
-    #[serde(rename = "f")]
-    pub first_trade_id: i64, // First trade ID
-
-    #[serde(rename = "L")]
-    pub last_trade_id: i64, // Last trade I
-
-    #[serde(rename = "o")]
-    pub open_price: String, // Open price
-
-    #[serde(rename = "c")]
-    pub close_price: String, // Close price
-
-    #[serde(rename = "h")]
-    pub high_price: String, // High price
-
-    #[serde(rename = "l")]
-    pub low_price: String, // Low price
-
-    #[serde(rename = "v")]
-    pub base_volume: String, // Base asset volume
-
-    #[serde(rename = "n")]
-    pub trade_count: i64, // Number of trades
-
-    #[serde(rename = "x")]
-    pub is_closed: bool, // Is this kline closed?
-
-    #[serde(rename = "q")]
-    pub quote_volume: String, // Quote asset volume
-
-    #[serde(rename = "V")]
-    pub taker_buy_base_volume: String, // Taker buy base asset volume
-
-    #[serde(rename = "Q")]
-    pub taker_buy_quote_volume: String, // Taker buy quote asset volume
-
-    #[serde(rename = "B")]
-    pub ignore: String, // Ignore
-}
 
 #[derive(Debug, Clone)]
 pub struct BinanceWebSocket {
@@ -498,6 +387,7 @@ impl BinanceWebSocket {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::dto::binance::websocket::DepthUpdateData;
     use tokio::sync::mpsc;
 
     #[tokio::test]
@@ -604,45 +494,6 @@ mod tests {
 
         // 等待 WebSocket 任务完成
         let _ = ws_handle.await;
-    }
-
-    #[test]
-    fn test_kline_data_parsing() {
-        let json_str = r#"{
-            "e": "kline",
-            "E": 1638747660000,
-            "s": "BTCUSDT",
-            "k": {
-                "t": 1638747660000,
-                "T": 1638747719999,
-                "s": "BTCUSDT",
-                "i": "1m",
-                "f": 100,
-                "L": 200,
-                "o": "0.0010",
-                "c": "0.0020",
-                "h": "0.0025",
-                "l": "0.0015",
-                "v": "1000",
-                "n": 100,
-                "x": false,
-                "q": "1.0000",
-                "V": "500",
-                "Q": "0.500",
-                "B": "123456"
-            }
-        }"#;
-
-        let data: KlineData = serde_json::from_str(json_str).unwrap();
-
-        assert_eq!(data.symbol, "BTCUSDT");
-        assert_eq!(data.event_type, "kline");
-        assert_eq!(data.kline.interval, "1m");
-        assert_eq!(data.kline.open_price, "0.0010");
-        assert_eq!(data.kline.close_price, "0.0020");
-        assert_eq!(data.kline.high_price, "0.0025");
-        assert_eq!(data.kline.low_price, "0.0015");
-        assert_eq!(data.kline.is_closed, false);
     }
 
     #[tokio::test]

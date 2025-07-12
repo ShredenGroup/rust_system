@@ -70,11 +70,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                         
                         // 提取价格信息
                         let symbol = kline_data.symbol.clone();
-                        let close_price = kline_data.kline.close_price.parse::<f64>().unwrap_or(0.0);
-                        let open_price = kline_data.kline.open_price.parse::<f64>().unwrap_or(0.0);
-                        let high_price = kline_data.kline.high_price.parse::<f64>().unwrap_or(0.0);
-                        let low_price = kline_data.kline.low_price.parse::<f64>().unwrap_or(0.0);
-                        let base_volume = kline_data.kline.base_volume.parse::<f64>().unwrap_or(0.0);
+                        let close_price = kline_data.kline.close_price;
+                        let open_price = kline_data.kline.open_price;
+                        let high_price = kline_data.kline.high_price;
+                        let low_price = kline_data.kline.low_price;
+                        let base_volume = kline_data.kline.base_volume;
                         
                         // 计算价格变化
                         let price_change = close_price - open_price;

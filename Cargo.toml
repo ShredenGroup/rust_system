@@ -55,3 +55,6 @@ sha2 = "0.10"
 hex = "0.4"
 ndarray = {version = "0.16.1", features = ["rayon"]}
 rust_decimal = "1.37.2"
+
+# Technical Analysis
+ta = {path="../ta-rs"}
