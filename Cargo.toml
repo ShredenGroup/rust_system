@@ -12,6 +12,8 @@ path = "src/lib.rs"
 tokio = { version = "1.36", features = ["full"] }
 tokio-cron = "0.1.3"
 redis = {version = "0.32.0", features = ['tokio-comp', 'aio']}
+futures = "0.3"
+
 # Database - SeaORM
 sea-orm = { version = "1.1", features = ["sqlx-postgres", "runtime-tokio-rustls", "macros", "with-chrono", "with-json"] }
 sea-orm-migration = "1.1"
@@ -22,7 +24,6 @@ reqwest = { version = "0.11", features = ["json"] }
 # WebSocket
 tokio-tungstenite = { version = "0.21", features = ["native-tls"] }
 url = "2.5"
-futures = "0.3"
 
 # Serialization
 serde = { version = "1.0", features = ["derive"] }
@@ -55,6 +56,9 @@ sha2 = "0.10"
 hex = "0.4"
 ndarray = {version = "0.16.1", features = ["rayon"]}
 rust_decimal = "1.37.2"
+
+# Parallel processing
+rayon = "1.8"
 
 # Technical Analysis
 ta = {path="../ta-rs"}

@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use anyhow::Result;
-
+use ta::{Close,Open,High,Low,Volume,Not,Tbbav,Tbqav,Qav};
 /// 订单类型枚举
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "SCREAMING_SNAKE_CASE")]
@@ -53,29 +53,89 @@ pub struct KlineData {
     #[serde(rename = "0")]
     pub open_time: i64,
     #[serde(rename = "1")]
-    pub open: String,
+    pub open: f64,
     #[serde(rename = "2")]
-    pub high: String,
+    pub high: f64,
     #[serde(rename = "3")]
-    pub low: String,
+    pub low: f64,
     #[serde(rename = "4")]
-    pub close: String,
+    pub close: f64,
     #[serde(rename = "5")]
-    pub volume: String,
+    pub volume: f64,
     #[serde(rename = "6")]
     pub close_time: i64,
     #[serde(rename = "7")]
-    pub quote_volume: String,
+    pub quote_volume: f64,
     #[serde(rename = "8")]
-    pub trades_count: i64,
+    pub trades_count: u64,
     #[serde(rename = "9")]
-    pub taker_buy_volume: String,
+    pub taker_buy_volume: f64,
     #[serde(rename = "10")]
-    pub taker_buy_quote_volume: String,
+    pub taker_buy_quote_volume: f64,
     #[serde(rename = "11")]
-    pub ignore: String,
+    pub ignore: f64,
+}
+// 为 KlineInfo 实现 ta-rs 的 trait
+impl Open for KlineData {
+    fn open(&self) -> f64 {
+        self.open
+    }
 }
 
+impl High for KlineData {
+    fn high(&self) -> f64 {
+        self.high
+    }
+}
+
+impl Low for KlineData {
+    fn low(&self) -> f64 {
+        self.low
+    }
+}
+
+impl Close for KlineData {
+    fn close(&self) -> f64 {
+        self.close
+    }
+}
+
+impl Volume for KlineData {
+    fn volume(&self) -> f64 {
+        self.volume
+    }
+}
+
+impl Qav for KlineData {
+    fn qav(&self) -> Option<f64> {
+        match self.quote_volume {
+            0.0 => None,
+            _ => Some(self.quote_volume),
+        }
+    }
+}
+
+impl Tbqav for KlineData {
+    fn tbqav(&self) -> Option<f64> {
+        match self.taker_buy_quote_volume {
+            0.0 => None,
+            _ => Some(self.taker_buy_quote_volume),
+        }
+    }
+}
+impl Tbbav for KlineData{
+    fn tbbav(&self) -> Option<f64> {
+        match self.taker_buy_volume{
+            0.0 => None,
+            _ => Some(self.taker_buy_volume)
+        }
+    }
+}
+impl Not for KlineData {
+    fn not(&self) -> Option<u64> {
+        Some(self.trades_count)
+    }
+}
 /// K线数据响应类型别名
 pub type KlineResponse = Vec<KlineData>;
 
