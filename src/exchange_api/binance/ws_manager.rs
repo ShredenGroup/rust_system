@@ -20,13 +20,13 @@ pub enum WebSocketDataType {
     DiffDepth,      // 订单簿深度差异
 }
 
-/// WebSocket 消息类型
+/// WebSocket 消息类型 - 使用 Arc 优化内存使用
 #[derive(Debug, Clone)]
 pub enum WebSocketMessage {
-    MarkPrice(MarkPriceData),
-    Kline(KlineData),
-    PartialDepth(DepthUpdateData),
-    DiffDepth(DepthUpdateData),
+    MarkPrice(Arc<MarkPriceData>),
+    Kline(Arc<KlineData>),
+    PartialDepth(Arc<DepthUpdateData>),
+    DiffDepth(Arc<DepthUpdateData>),
 }
 
 /// WebSocket 连接信息
@@ -104,7 +104,7 @@ impl WebSocketManager {
                     let message_tx_clone = message_tx.clone();
                     tokio::spawn(async move {
                         while let Some(data) = mark_price_rx.recv().await {
-                            if let Err(e) = message_tx_clone.send(WebSocketMessage::MarkPrice(data)) {
+                            if let Err(e) = message_tx_clone.send(WebSocketMessage::MarkPrice(Arc::new(data))) {
                                 eprintln!("Failed to forward mark price message: {}", e);
                                 break;
                             }
@@ -136,7 +136,7 @@ impl WebSocketManager {
                     let message_tx_clone = message_tx.clone();
                     tokio::spawn(async move {
                         while let Some(data) = mark_price_rx.recv().await {
-                            if let Err(e) = message_tx_clone.send(WebSocketMessage::MarkPrice(data)) {
+                            if let Err(e) = message_tx_clone.send(WebSocketMessage::MarkPrice(Arc::new(data))) {
                                 eprintln!("Failed to forward mark price message: {}", e);
                                 break;
                             }
@@ -210,7 +210,7 @@ impl WebSocketManager {
                 let message_tx_clone = message_tx.clone();
                 tokio::spawn(async move {
                     while let Some(data) = kline_rx.recv().await {
-                        if let Err(e) = message_tx_clone.send(WebSocketMessage::Kline(data)) {
+                        if let Err(e) = message_tx_clone.send(WebSocketMessage::Kline(Arc::new(data))) {
                             eprintln!("Failed to forward kline message: {}", e);
                             break;
                         }
@@ -272,7 +272,7 @@ impl WebSocketManager {
                 let message_tx_clone = message_tx.clone();
                 tokio::spawn(async move {
                     while let Some(data) = depth_rx.recv().await {
-                        if let Err(e) = message_tx_clone.send(WebSocketMessage::PartialDepth(data)) {
+                        if let Err(e) = message_tx_clone.send(WebSocketMessage::PartialDepth(Arc::new(data))) {
                             eprintln!("Failed to forward partial depth message: {}", e);
                             break;
                         }
@@ -333,7 +333,7 @@ impl WebSocketManager {
                 let message_tx_clone = message_tx.clone();
                 tokio::spawn(async move {
                     while let Some(data) = depth_rx.recv().await {
-                        if let Err(e) = message_tx_clone.send(WebSocketMessage::DiffDepth(data)) {
+                        if let Err(e) = message_tx_clone.send(WebSocketMessage::DiffDepth(Arc::new(data))) {
                             eprintln!("Failed to forward diff depth message: {}", e);
                             break;
                         }

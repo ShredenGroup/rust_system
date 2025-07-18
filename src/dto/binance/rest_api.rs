@@ -337,10 +337,10 @@ mod tests {
 
         let kline: KlineData = serde_json::from_str(json_str).unwrap();
         assert_eq!(kline.open_time, 1640995200000);
-        assert_eq!(kline.open, "50000.00");
-        assert_eq!(kline.high, "51000.00");
-        assert_eq!(kline.low, "49000.00");
-        assert_eq!(kline.close, "50500.00");
-        assert_eq!(kline.volume, "1000.00");
+        assert_eq!(kline.open, 50000.0);
+        assert_eq!(kline.high, 51000.0);
+        assert_eq!(kline.low, 49000.0);
+        assert_eq!(kline.close, 50500.0);
+        assert_eq!(kline.volume, 1000.0);
     }
 } 

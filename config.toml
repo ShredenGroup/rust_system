@@ -15,19 +15,16 @@ tags = ["default"]
 symbol = ["btcusdt"]
 interval = "1m"
 
-# 其他配置暂时注释掉
-# [[mark_price]]
-# symbol = ["btcusdt"]
-# interval = "1m"
+# 添加深度数据配置 - 250ms 间隔
+[[partial_depth]]
+symbol = ["btcusdt"]
+levels = 10
+interval = "250ms"
 
-# [[partial_depth]]
-# symbol = ["btcusdt"]
-# levels = 10
-# interval = "100ms"
-
-# [[diff_depth]]
-# symbol = ["btcusdt"]
-# level = 5
+# 添加标记价格配置 - 1s 间隔
+[[mark_price]]
+symbol = ["btcusdt"]
+interval = "1s"
 
 # 消息处理策略配置
 [processing]

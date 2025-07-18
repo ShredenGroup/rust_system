@@ -6,6 +6,7 @@ use rust_system::{
     exchange_api::binance::ws_manager::{WebSocketMessage, create_websocket_manager},
 };
 use std::time::Instant;
+use std::sync::Arc;
 use tokio::signal;
 
 #[tokio::main]
@@ -68,7 +69,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     Some(WebSocketMessage::Kline(kline_data)) => {
                         message_count += 1;
                         
-                        // 提取价格信息
+                        // 提取价格信息 - 现在 kline_data 是 Arc<KlineData>
                         let symbol = kline_data.symbol.clone();
                         let close_price = kline_data.kline.close_price;
                         let open_price = kline_data.kline.open_price;
@@ -118,6 +119,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                             last_change_percent,
                             messages_per_second
                         );
+                        
+                        // 演示 Arc 的使用 - 可以轻松地将数据传递给其他模块
+                        let data_for_strategy = kline_data.clone();  // 只克隆 Arc，不克隆数据
+                        println!("🔄 Arc 引用计数: {}", Arc::strong_count(&kline_data));
                         
                         println!("{}", "-".repeat(60));
                     }

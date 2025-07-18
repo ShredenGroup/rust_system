@@ -2,6 +2,7 @@
 name = "rust_system"
 version = "0.1.0"
 edition = "2024"
+default-run = "rust_system"
 
 [lib]
 name = "rust_system"
@@ -62,3 +63,16 @@ rayon = "1.8"
 
 # Technical Analysis
 ta = {path="../ta-rs"}
+serde_with = "3.14.0"
+
+[[bin]]
+name = "rust_system"
+path = "src/main.rs"
+
+[[bin]]
+name = "macd_signal_test"
+path = "src/bin/macd_signal_test.rs"
+
+[[bin]]
+name = "arc_vs_ref_benchmark"
+path = "src/bin/arc_vs_ref_benchmark.rs"

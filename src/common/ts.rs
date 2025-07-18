@@ -5,7 +5,7 @@ pub trait ToArray{
     fn to_ndarray(&self) -> Array<f32, Ix2>;
 }
 
-pub trait Strategy<T>{
+pub trait Strategy<T>:Send+Sync+Clone{
     type Output;
-    fn on_kline_update(&mut self,input:&T) -> Self::Output;
+    fn on_kline_update(&mut self, input: T) -> Self::Output;
 }

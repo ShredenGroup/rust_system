@@ -423,12 +423,12 @@ mod tests {
     fn test_serialization_performance() {
         let data = MarkPriceData {
             symbol: "BTCUSDT".to_string(),
-            mark_price: "50000.00".to_string(),
-            index_price: "50001.00".to_string(),
-            estimated_settle_price: "50000.50".to_string(),
-            last_funding_rate: "0.0001".to_string(),
+            mark_price: 50000.0,
+            index_price: 50001.0,
+            estimated_settle_price: 50000.5,
+            last_funding_rate: 0.0001,
             next_funding_time: 1640995200000,
-            interest_rate: "0.0001".to_string(),
+            interest_rate: 0.0001,
             time: 1640995200000,
         };
 
@@ -466,6 +466,12 @@ mod tests {
         assert_eq!(data.event_type, "depthUpdate");
         assert_eq!(data.bids.len(), 1);
         assert_eq!(data.asks.len(), 1);
+        
+        // 测试自动转换后的数值类型
+        assert_eq!(data.bids[0][0], 200.0);
+        assert_eq!(data.bids[0][1], 260.401);
+        assert_eq!(data.asks[0][0], 2521.13);
+        assert_eq!(data.asks[0][1], 37.315);
     }
 
     #[tokio::test]
