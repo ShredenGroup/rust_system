@@ -9,7 +9,7 @@ use ta::indicators::hbfc_one::HbfcOne;
 use ta::indicators::{SimpleMovingAverage, hbfc_one};
 use ta::{Close, High, Low, Next, Open, Tbbav, Tbqav};
 use std::sync::Arc;
-
+use rayon::prelude::*;
 #[derive(Clone)]
 pub struct MacdStrategy {
     pub ema: SimpleMovingAverage,
@@ -31,17 +31,19 @@ where
 {
     type Output = Signal;
     fn on_kline_update(&mut self, input: &T) -> Signal {
+        // 顺序计算，简单高效
         let hbfc_val = self.hbfc.next(input);
-        println!("New hbfc_val{:?}", hbfc_val);
-        let _ema = self.ema.next(input);
+        let ema_val = self.ema.next(input);
         
-        // 示例逻辑：根据指标值决定信号
+        println!("New hbfc_val{:?}", hbfc_val);
+        println!("New ema_val{:?}", ema_val);
+        
+        // 后续逻辑...
         if hbfc_val.is_some() && hbfc_val.unwrap() > 0.5 {
             Signal::buy("BTCUSDT".to_string(), input.close(), 0.1)
         } else if hbfc_val.is_some() && hbfc_val.unwrap() < -0.5 {
             Signal::sell("BTCUSDT".to_string(), input.close(), 0.1)
         } else {
-            // 创建带有正确 symbol 信息的 hold 信号
             Signal {
                 signal_type: None,
                 symbol: "BTCUSDT".to_string(),
@@ -56,14 +58,12 @@ where
 // 为 Arc<T> 类型实现 Strategy trait - 泛型实现
 impl<T> Strategy<Arc<T>> for MacdStrategy
 where
-    T: High + Low + Close + Open + Tbbav + Tbqav,
+    T: High + Low + Close + Open + Tbbav + Tbqav+Sync+Send,
 {
     type Output = Signal;
     fn on_kline_update(&mut self, input: Arc<T>) -> Signal {
         let hbfc_val = self.hbfc.next(input.as_ref());
-        println!("New hbfc_val from Arc<T>: {:?}", hbfc_val);
         let _ema = self.ema.next(input.as_ref());
-        
         // 示例逻辑：根据指标值决定信号
         if hbfc_val.is_some() && hbfc_val.unwrap() > 0.5 {
             Signal::buy("BTCUSDT".to_string(), input.close(), 0.1)
@@ -209,6 +209,64 @@ mod tests {
         assert_eq!(signal.symbol, "BTCUSDT");
         assert_eq!(signal.price, 46000.0);
         assert!(signal.timestamp > 0);
+    }
+}
+
+#[cfg(test)]
+mod performance_tests {
+    use super::*;
+    use crate::dto::binance::websocket::KlineInfo;
+    use std::time::Instant;
+
+    // 创建测试用的 KlineInfo 数据
+    fn create_test_kline_data() -> KlineInfo {
+        KlineInfo {
+            start_time: 1638747660000,
+            close_time: 1638747719999,
+            symbol: "BTCUSDT".to_string(),
+            interval: "1m".to_string(),
+            first_trade_id: 100,
+            last_trade_id: 200,
+            open_price: 50000.0,
+            close_price: 51000.0,
+            high_price: 52000.0,
+            low_price: 49000.0,
+            base_volume: 1000.0,
+            trade_count: 100,
+            is_closed: true,
+            quote_volume: 50000000.0,
+            taker_buy_base_volume: 600.0,
+            taker_buy_quote_volume: 30000000.0,
+            ignore: "ignore".to_string(),
+        }
+    }
+
+    #[test]
+    fn benchmark_sequential_vs_parallel() {
+        let mut strategy = MacdStrategy::new(20).unwrap();
+        let kline_data = create_test_kline_data();
+        
+        // 顺序计算
+        let start = Instant::now();
+        for _ in 0..1000 {
+            let _hbfc_val = strategy.hbfc.next(&kline_data);
+            let _ema_val = strategy.ema.next(&kline_data);
+        }
+        let sequential_time = start.elapsed();
+        
+        // 并行计算
+        let start = Instant::now();
+        for _ in 0..1000 {
+            let _result = rayon::join(
+                || strategy.hbfc.next(&kline_data),
+                || strategy.ema.next(&kline_data),
+            );
+        }
+        let parallel_time = start.elapsed();
+        
+        println!("Sequential: {:?}", sequential_time);
+        println!("Parallel: {:?}", parallel_time);
+        println!("Ratio: {:.2}x", parallel_time.as_nanos() as f64 / sequential_time.as_nanos() as f64);
     }
 }
 

@@ -1,3 +1,4 @@
 pub mod common;
 pub mod macd;
-pub mod signal;
+
+pub mod strategy_manager;
