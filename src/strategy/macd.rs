@@ -9,7 +9,7 @@ use ta::indicators::hbfc_one::HbfcOne;
 use ta::indicators::{SimpleMovingAverage, hbfc_one};
 use ta::{Close, High, Low, Next, Open, Tbbav, Tbqav};
 use std::sync::Arc;
-use rayon::prelude::*;
+
 #[derive(Clone)]
 pub struct MacdStrategy {
     pub ema: SimpleMovingAverage,
@@ -30,15 +30,15 @@ where
     T: High + Low + Close + Open + Tbbav + Tbqav,
 {
     type Output = Signal;
+    
     fn on_kline_update(&mut self, input: &T) -> Signal {
-        // 顺序计算，简单高效
         let hbfc_val = self.hbfc.next(input);
-        let ema_val = self.ema.next(input);
+        let _ema = self.ema.next(input);
         
         println!("New hbfc_val{:?}", hbfc_val);
-        println!("New ema_val{:?}", ema_val);
+        println!("New ema_val{:?}", _ema);
         
-        // 后续逻辑...
+        // 示例逻辑：根据指标值决定信号
         if hbfc_val.is_some() && hbfc_val.unwrap() > 0.5 {
             Signal::buy("BTCUSDT".to_string(), input.close(), 0.1)
         } else if hbfc_val.is_some() && hbfc_val.unwrap() < -0.5 {
@@ -55,22 +55,26 @@ where
     }
 }
 
-// 为 Arc<T> 类型实现 Strategy trait - 泛型实现
+// 为 Arc<T> 类型实现 Strategy trait
 impl<T> Strategy<Arc<T>> for MacdStrategy
 where
-    T: High + Low + Close + Open + Tbbav + Tbqav+Sync+Send,
+    T: High + Low + Close + Open + Tbbav + Tbqav + Send + Sync + 'static,
 {
     type Output = Signal;
+    
     fn on_kline_update(&mut self, input: Arc<T>) -> Signal {
         let hbfc_val = self.hbfc.next(input.as_ref());
         let _ema = self.ema.next(input.as_ref());
+        
+        println!("New hbfc_val{:?}", hbfc_val);
+        println!("New ema_val{:?}", _ema);
+        
         // 示例逻辑：根据指标值决定信号
         if hbfc_val.is_some() && hbfc_val.unwrap() > 0.5 {
             Signal::buy("BTCUSDT".to_string(), input.close(), 0.1)
         } else if hbfc_val.is_some() && hbfc_val.unwrap() < -0.5 {
             Signal::sell("BTCUSDT".to_string(), input.close(), 0.1)
         } else {
-            // 创建带有正确 symbol 信息的 hold 信号
             Signal {
                 signal_type: None,
                 symbol: "BTCUSDT".to_string(),
@@ -157,7 +161,7 @@ mod tests {
         // 包装在 Arc 中
         let arc_kline = Arc::new(kline_info);
 
-        // 测试 Strategy<Arc<KlineInfo>> trait 实现
+        // 测试 Strategy trait 实现
         let signal = strategy.on_kline_update(arc_kline);
         println!("Generated signal from Arc<KlineInfo>: {:?}", signal);
         
@@ -201,7 +205,7 @@ mod tests {
         // 所以我们创建一个 Arc<KlineInfo> 来测试
         let arc_kline_info = Arc::new(kline_data.kline);
         
-        // 测试 Strategy<Arc<T>> trait 实现 - 直接传递 Arc 值
+        // 测试 Strategy trait 实现 - 直接传递 Arc 值
         let signal = strategy.on_kline_update(arc_kline_info);
         println!("Generated signal from Arc<KlineInfo> (from WebSocket): {:?}", signal);
         
