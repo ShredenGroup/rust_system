@@ -9,4 +9,5 @@ pub trait ToArray{
 pub trait Strategy<T>: Send + Sync {
     type Output;
     fn on_kline_update(&mut self, input: T) -> Self::Output;
+    fn name(&self) -> String;
 }

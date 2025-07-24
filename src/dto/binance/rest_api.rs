@@ -187,6 +187,7 @@ pub struct OrderRequest {
 
 /// 下单响应
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct OrderResponse {
     pub client_order_id: String,
     pub cum_qty: String,
@@ -204,6 +205,7 @@ pub struct OrderResponse {
     pub close_position: bool,
     pub symbol: String,
     pub time_in_force: String,
+    #[serde(rename = "type")]
     pub order_type: String,
     pub orig_type: String,
     pub activate_price: Option<String>,

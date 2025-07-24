@@ -53,6 +53,9 @@ where
             }
         }
     }
+    fn name(&self) -> String {
+        "macd".to_string()
+    }
 }
 
 // 为 Arc<T> 类型实现 Strategy trait
@@ -83,6 +86,9 @@ where
                 timestamp: chrono::Utc::now().timestamp(),
             }
         }
+    }
+    fn name(&self) -> String {
+        "macd".to_string()
     }
 }
 

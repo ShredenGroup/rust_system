@@ -13,7 +13,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 /// 币安期货 API 客户端
 #[derive(Debug, Clone)]
 pub struct BinanceFuturesApi {
-    base_url: String,
+    pub base_url: String,
     client: Client,
     api_key: String,
     secret_key: String,
@@ -31,7 +31,7 @@ impl BinanceFuturesApi {
     }
 
     /// 获取当前时间戳（毫秒）
-    fn get_timestamp() -> u64 {
+    pub fn get_timestamp() -> u64 {
         SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .unwrap()
@@ -39,14 +39,14 @@ impl BinanceFuturesApi {
     }
 
     /// 构建查询字符串
-    fn build_query_string(&self, params: &HashMap<String, String>) -> String {
+    pub fn build_query_string(&self, params: &HashMap<String, String>) -> String {
         let mut pairs: Vec<String> = params.iter().map(|(k, v)| format!("{}={}", k, v)).collect();
         pairs.sort(); // 币安要求参数按字母顺序排序
         pairs.join("&")
     }
 
     /// 生成签名
-    fn generate_signature(&self, query_string: &str) -> String {
+    pub fn generate_signature(&self, query_string: &str) -> String {
         generate_hmac_signature(query_string, &self.secret_key)
     }
 

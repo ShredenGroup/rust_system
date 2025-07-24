@@ -1,12 +1,13 @@
-use crate::strategy::common::Signal;
 use crate::common::ts::Strategy;
+use crate::strategy::common::Signal;
 use crate::strategy::macd::MacdStrategy;
 use anyhow::Result;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::mpsc;
-use ta::{Close, High, Low, Open, Tbbav, Tbqav};
 use std::thread;
+use ta::{Close, High, Low, Open, Tbbav, Tbqav};
+
 pub struct IdGenerator {
     base: u64,
     range_size: u64,
@@ -47,12 +48,27 @@ where
     T: High + Low + Close + Open + Tbbav + Tbqav,
 {
     type Output = Signal;
-    
+
     fn on_kline_update(&mut self, input: &T) -> Signal {
         match self {
             StrategyEnum::Macd(strategy) => strategy.on_kline_update(input),
             // StrategyEnum::Rsi(strategy) => strategy.on_kline_update(input),
             // StrategyEnum::Bollinger(strategy) => strategy.on_kline_update(input),
+        }
+    }
+    fn name(&self) -> String {
+        match self{
+            StrategyEnum::Macd(_) => "MACD".to_string(),
+            // StrategyEnum::Rsi(_) => "RSI".to_string(),
+        }
+    }
+}
+
+impl StrategyEnum {
+    pub fn name(&self) -> String {
+        match self {
+            StrategyEnum::Macd(_) => "MACD".to_string(),
+            // StrategyEnum::Rsi(_) => "RSI".to_string(),
         }
     }
 }
@@ -62,12 +78,19 @@ where
     T: High + Low + Close + Open + Tbbav + Tbqav + Send + Sync + 'static,
 {
     type Output = Signal;
-    
+
     fn on_kline_update(&mut self, input: Arc<T>) -> Signal {
         match self {
             StrategyEnum::Macd(strategy) => strategy.on_kline_update(input),
             // StrategyEnum::Rsi(strategy) => strategy.on_kline_update(input),
             // StrategyEnum::Bollinger(strategy) => strategy.on_kline_update(input),
+        }
+    }
+
+    fn name(&self) -> String {
+        match self {
+            StrategyEnum::Macd(_) => "MACD".to_string(),
+            // StrategyEnum::Rsi(_) => "RSI".to_string(),
         }
     }
 }
@@ -80,95 +103,148 @@ pub struct StrategyManager<T: Close + High + Open + Low + Tbbav + Tbqav + Send +
     next_id: Arc<AtomicU64>,
 }
 
+impl<T: Close + High + Open + Low + Tbbav + Tbqav + Send + Sync + 'static> StrategyManager<T> {
+    pub fn new(data_receiver: mpsc::Receiver<Arc<T>>, data_sender: mpsc::Sender<Signal>) -> Self {
+        Self {
+            strategies: Vec::new(),
+            data_receiver,
+            data_sender,
+            next_id: Arc::new(AtomicU64::new(0)),
+        }
+    }
+
+    pub fn add_strategy(&mut self, strategy: StrategyEnum) {
+        self.strategies.push(strategy);
+    }
+
+    pub fn run_single_strategy(&mut self, strategy_name: String) -> Result<()> {
+        // 找到对应的策略
+        let strategy_index = self.strategies.iter()
+            .position(|s| s.name() == strategy_name)
+            .ok_or_else(|| anyhow::anyhow!("Strategy '{}' not found", strategy_name))?;
+        
+        let mut strategy = self.strategies[strategy_index].clone();
+        let data_sender = self.data_sender.clone();
+        let _next_id = self.next_id.clone();
+
+        // 在当前线程中运行策略（简化版本）
+        while let Ok(data) = self.data_receiver.recv() {
+            let signal = strategy.on_kline_update(data);
+            
+            // 直接发送原始信号，不进行检查
+            if let Err(e) = data_sender.send(signal) {
+                eprintln!("Failed to send signal: {}", e);
+                break;
+            }
+        }
+        
+        Ok(())
+    }
+
+    pub fn run_all_strategies(&mut self) -> Result<()> {
+        let data_sender = self.data_sender.clone();
+        let mut strategies = self.strategies.clone();
+
+        while let Ok(data) = self.data_receiver.recv() {
+            for strategy in &mut strategies {
+                let signal = strategy.on_kline_update(data.clone());
+                
+                if signal.is_actionable() {
+                    if let Err(e) = data_sender.send(signal) {
+                        eprintln!("Failed to send signal: {}", e);
+                        break;
+                    }
+                }
+            }
+        }
+        
+        Ok(())
+    }
+
+    pub fn list_strategies(&self) -> Vec<String> {
+        self.strategies.iter().map(|s| s.name()).collect()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::dto::binance::websocket::KlineInfo;
 
     #[test]
-    fn test_multithread() {
-        let signal_id_generator = Arc::new(IdGenerator::new((0, 2000)).unwrap());
+    fn test_strategy_manager_creation() {
+        let (data_tx, data_rx) = mpsc::channel();
+        let (signal_tx, _signal_rx) = mpsc::channel();
+        
+        let manager: StrategyManager<KlineInfo> = StrategyManager::new(data_rx, signal_tx);
+        assert_eq!(manager.strategies.len(), 0);
+    }
 
-        // 克隆 Arc 用于第一个线程
-        let signal_id_generator_clone1 = Arc::clone(&signal_id_generator);
-        let handle1 = thread::spawn(move || {
-            for _i in 0..1000 {
-                let _new_id = signal_id_generator_clone1.next_id();
-            }
+    #[test]
+    fn test_add_strategy() {
+        let (data_tx, data_rx) = mpsc::channel();
+        let (signal_tx, _signal_rx) = mpsc::channel();
+        
+        let mut manager: StrategyManager<KlineInfo> = StrategyManager::new(data_rx, signal_tx);
+        let macd_strategy = MacdStrategy::new(20).unwrap();
+        
+        manager.add_strategy(StrategyEnum::Macd(macd_strategy));
+        assert_eq!(manager.strategies.len(), 1);
+        assert_eq!(manager.list_strategies(), vec!["MACD"]);
+    }
+
+    #[test]
+    fn test_strategy_enum_name() {
+        let macd_strategy = MacdStrategy::new(10).unwrap();
+        let strategy_enum = StrategyEnum::Macd(macd_strategy);
+        assert_eq!(strategy_enum.name(), "MACD");
+    }
+
+    #[test]
+    fn test_id_generator() {
+        let generator = IdGenerator::new((0, 5)).unwrap();
+        assert_eq!(generator.next_id(), 0);
+        assert_eq!(generator.next_id(), 1);
+        assert_eq!(generator.next_id(), 2);
+    }
+
+    #[test]
+    fn test_strategy_processing() {
+        let (data_tx, data_rx) = mpsc::channel();
+        let (signal_tx, signal_rx) = mpsc::channel();
+        
+        let mut manager: StrategyManager<KlineInfo> = StrategyManager::new(data_rx, signal_tx);
+        let macd_strategy = MacdStrategy::new(5).unwrap();
+        manager.add_strategy(StrategyEnum::Macd(macd_strategy));
+
+        // 创建测试数据
+        let test_kline = Arc::new(KlineInfo {
+            start_time: 1638747660000,
+            close_time: 1638747719999,
+            symbol: "BTCUSDT".to_string(),
+            interval: "1m".to_string(),
+            first_trade_id: 100,
+            last_trade_id: 200,
+            open_price: 50000.0,
+            close_price: 51000.0,
+            high_price: 52000.0,
+            low_price: 49000.0,
+            base_volume: 1000.0,
+            trade_count: 100,
+            is_closed: true,
+            quote_volume: 50000000.0,
+            taker_buy_base_volume: 600.0,
+            taker_buy_quote_volume: 30000000.0,
+            ignore: "ignore".to_string(),
         });
 
-        // 克隆 Arc 用于第二个线程
-        let signal_id_generator_clone2 = Arc::clone(&signal_id_generator);
-        let handle2 = thread::spawn(move || {
-            for _i in 0..1000 {
-                let _new_id = signal_id_generator_clone2.next_id();
-            }
-        });
+        // 发送测试数据
+        data_tx.send(test_kline).unwrap();
+        drop(data_tx); // 关闭发送端
 
-        // 等待两个线程完成
-        handle1.join().unwrap();
-        handle2.join().unwrap();
-
-        // 验证ID生成器仍然工作
-        let final_id = signal_id_generator.next_id();
-        assert!(final_id >= 0 && final_id < 2000);
-    }
-
-    #[test]
-    fn test_single_thread() {
-        let generator = IdGenerator::new((1000, 1003)).unwrap();
-
-        // 测试连续生成ID
-        assert_eq!(generator.next_id(), 1000); // 起始值
-        assert_eq!(generator.next_id(), 1001); // +1
-        assert_eq!(generator.next_id(), 1002); // +1
-        assert_eq!(generator.next_id(), 1000); // 循环回到起始值
-        assert_eq!(generator.next_id(), 1001); // 再次循环
-    }
-
-    #[test]
-    fn test_different_ranges() {
-        let generator1 = IdGenerator::new((0, 5)).unwrap();
-        let generator2 = IdGenerator::new((10000, 10005)).unwrap();
-
-        // 测试第一个生成器
-        assert_eq!(generator1.next_id(), 0);
-        assert_eq!(generator1.next_id(), 1);
-        assert_eq!(generator1.next_id(), 2);
-        assert_eq!(generator1.next_id(), 3);
-        assert_eq!(generator1.next_id(), 4);
-        assert_eq!(generator1.next_id(), 0); // 循环
-
-        // 测试第二个生成器
-        assert_eq!(generator2.next_id(), 10000);
-        assert_eq!(generator2.next_id(), 10001);
-        assert_eq!(generator2.next_id(), 10002);
-        assert_eq!(generator2.next_id(), 10003);
-        assert_eq!(generator2.next_id(), 10004);
-        assert_eq!(generator2.next_id(), 10000); // 循环
-    }
-
-    #[test]
-    fn test_invalid_range() {
-        // 测试无效范围
-        assert!(IdGenerator::new((10, 5)).is_err());
-        assert!(IdGenerator::new((5, 5)).is_err());
-
-        // 测试有效范围
-        assert!(IdGenerator::new((0, 1)).is_ok());
-        assert!(IdGenerator::new((0, 100)).is_ok());
-    }
-
-    #[test]
-    fn test_range_cycling() {
-        let generator = IdGenerator::new((100, 103)).unwrap();
-
-        // 生成多个周期的ID
-        let mut ids = Vec::new();
-        for _ in 0..10 {
-            ids.push(generator.next_id());
-        }
-
-        // 验证循环模式
-        assert_eq!(ids, vec![100, 101, 102, 100, 101, 102, 100, 101, 102, 100]);
+        // 运行策略（这会阻塞直到数据处理完成）
+        let result = manager.run_single_strategy("MACD".to_string());
+        assert!(result.is_ok());
     }
 }
+

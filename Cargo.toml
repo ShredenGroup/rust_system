@@ -69,4 +69,12 @@ serde_with = "3.14.0"
 name = "rust_system"
 path = "src/main.rs"
 
+[[bin]]
+name = "macd_signal_test"
+path = "src/bin/macd_signal_test.rs"
+
+[[bin]]
+name = "strategy_manager_test"
+path = "src/bin/strategy_manager_test.rs"
+
 
