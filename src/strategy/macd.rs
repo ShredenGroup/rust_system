@@ -1,3 +1,4 @@
+use crate::common::ts::IsClosed;
 use crate::common::ts::Strategy;
 use crate::strategy::common::{Signal, SignalType};
 use crate::{
@@ -5,11 +6,10 @@ use crate::{
     exchange_api::binance::ws_manager::{WebSocketMessage, create_websocket_manager},
 };
 use anyhow::Result;
+use std::sync::Arc;
 use ta::indicators::hbfc_one::HbfcOne;
 use ta::indicators::{SimpleMovingAverage, hbfc_one};
 use ta::{Close, High, Low, Next, Open, Tbbav, Tbqav};
-use std::sync::Arc;
-
 #[derive(Clone)]
 pub struct MacdStrategy {
     pub ema: SimpleMovingAverage,
@@ -30,14 +30,13 @@ where
     T: High + Low + Close + Open + Tbbav + Tbqav,
 {
     type Output = Signal;
-    
+
     fn on_kline_update(&mut self, input: &T) -> Signal {
         let hbfc_val = self.hbfc.next(input);
         let _ema = self.ema.next(input);
-        
         println!("New hbfc_val{:?}", hbfc_val);
         println!("New ema_val{:?}", _ema);
-        
+
         // 示例逻辑：根据指标值决定信号
         if hbfc_val.is_some() && hbfc_val.unwrap() > 0.5 {
             Signal::buy("BTCUSDT".to_string(), input.close(), 0.1)
@@ -64,14 +63,14 @@ where
     T: High + Low + Close + Open + Tbbav + Tbqav + Send + Sync + 'static,
 {
     type Output = Signal;
-    
+
     fn on_kline_update(&mut self, input: Arc<T>) -> Signal {
         let hbfc_val = self.hbfc.next(input.as_ref());
         let _ema = self.ema.next(input.as_ref());
-        
+
         println!("New hbfc_val{:?}", hbfc_val);
         println!("New ema_val{:?}", _ema);
-        
+
         // 示例逻辑：根据指标值决定信号
         if hbfc_val.is_some() && hbfc_val.unwrap() > 0.5 {
             Signal::buy("BTCUSDT".to_string(), input.close(), 0.1)
@@ -107,7 +106,7 @@ mod tests {
     #[test]
     fn test_strategy_with_sample_data() {
         let mut strategy = MacdStrategy::new(10).unwrap();
-        
+
         // 创建测试用的 KlineInfo 数据
         let kline_info = KlineInfo {
             start_time: 1638747660000,
@@ -132,7 +131,7 @@ mod tests {
         // 测试 Strategy trait 实现
         let signal = strategy.on_kline_update(&kline_info);
         println!("Generated signal: {:?}", signal);
-        
+
         // 验证信号的基本属性
         assert_eq!(signal.symbol, "BTCUSDT");
         assert_eq!(signal.price, 51000.0);
@@ -142,7 +141,7 @@ mod tests {
     #[test]
     fn test_strategy_with_arc_kline_info() {
         let mut strategy = MacdStrategy::new(10).unwrap();
-        
+
         // 创建测试用的 KlineInfo 数据
         let kline_info = KlineInfo {
             start_time: 1638747660000,
@@ -170,7 +169,7 @@ mod tests {
         // 测试 Strategy trait 实现
         let signal = strategy.on_kline_update(arc_kline);
         println!("Generated signal from Arc<KlineInfo>: {:?}", signal);
-        
+
         // 验证信号的基本属性
         assert_eq!(signal.symbol, "BTCUSDT");
         assert_eq!(signal.price, 51000.0);
@@ -180,7 +179,7 @@ mod tests {
     #[test]
     fn test_strategy_with_arc_websocket_data() {
         let mut strategy = MacdStrategy::new(5).unwrap();
-        
+
         // 创建测试用的 WebSocket KlineData
         let kline_data = KlineData {
             event_type: "kline".to_string(),
@@ -210,11 +209,14 @@ mod tests {
         // 注意：WebSocketKlineData 本身不实现 ta 的 traits，我们需要使用 kline 字段
         // 所以我们创建一个 Arc<KlineInfo> 来测试
         let arc_kline_info = Arc::new(kline_data.kline);
-        
+
         // 测试 Strategy trait 实现 - 直接传递 Arc 值
         let signal = strategy.on_kline_update(arc_kline_info);
-        println!("Generated signal from Arc<KlineInfo> (from WebSocket): {:?}", signal);
-        
+        println!(
+            "Generated signal from Arc<KlineInfo> (from WebSocket): {:?}",
+            signal
+        );
+
         // 验证信号属性
         assert_eq!(signal.symbol, "BTCUSDT");
         assert_eq!(signal.price, 46000.0);
@@ -255,7 +257,7 @@ mod performance_tests {
     fn benchmark_sequential_vs_parallel() {
         let mut strategy = MacdStrategy::new(20).unwrap();
         let kline_data = create_test_kline_data();
-        
+
         // 顺序计算
         let start = Instant::now();
         for _ in 0..1000 {
@@ -263,7 +265,7 @@ mod performance_tests {
             let _ema_val = strategy.ema.next(&kline_data);
         }
         let sequential_time = start.elapsed();
-        
+
         // 并行计算
         let start = Instant::now();
         for _ in 0..1000 {
@@ -273,24 +275,27 @@ mod performance_tests {
             );
         }
         let parallel_time = start.elapsed();
-        
+
         println!("Sequential: {:?}", sequential_time);
         println!("Parallel: {:?}", parallel_time);
-        println!("Ratio: {:.2}x", parallel_time.as_nanos() as f64 / sequential_time.as_nanos() as f64);
+        println!(
+            "Ratio: {:.2}x",
+            parallel_time.as_nanos() as f64 / sequential_time.as_nanos() as f64
+        );
     }
 }
 
 // 使用示例：展示如何在 WebSocket 消息处理中使用策略
 pub async fn example_websocket_strategy_usage() -> Result<()> {
     let (ws_manager, mut message_rx) = create_websocket_manager().await?;
-    
+
     // 创建策略实例
     let mut macd_strategy = MacdStrategy::new(20)?;
-    
+
     // 启动 WebSocket 连接
     let kline_config = KlineConfig::new(
-        "BTCUSDT", 
-        "1m", 
+        "BTCUSDT",
+        "1m",
         WebSocketBaseConfig {
             auto_reconnect: true,
             max_retries: 5,
@@ -300,11 +305,11 @@ pub async fn example_websocket_strategy_usage() -> Result<()> {
             enable_heartbeat: true,
             heartbeat_interval_secs: 30,
             tags: vec!["strategy".to_string()],
-        }
+        },
     );
-    
+
     ws_manager.start_kline(kline_config).await?;
-    
+
     // 处理 WebSocket 消息
     while let Some(message) = message_rx.recv().await {
         match message {
@@ -312,7 +317,7 @@ pub async fn example_websocket_strategy_usage() -> Result<()> {
                 // 使用 kline 字段，它实现了所需的 traits
                 let kline_info = Arc::new(kline_data.kline.clone());
                 let signal = macd_strategy.on_kline_update(kline_info);
-                
+
                 // 修复信号类型匹配
                 match signal.signal_type {
                     Some(SignalType::Buy) => {
@@ -331,6 +336,6 @@ pub async fn example_websocket_strategy_usage() -> Result<()> {
             }
         }
     }
-    
+
     Ok(())
 }

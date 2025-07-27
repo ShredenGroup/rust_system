@@ -8,7 +8,15 @@ pub enum Exchange {
 
 #[derive(Debug, Clone, PartialEq)]
 #[repr(u8)]
-pub enum Strategy {
+pub enum StrategyName {
     MACD = 0,
     HBFC = 1,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum OrderStutus {
+    Pending,
+    Success,
+    Failed,
+    Canceled,
 }

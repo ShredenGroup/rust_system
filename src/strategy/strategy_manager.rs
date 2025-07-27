@@ -7,7 +7,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::mpsc;
 use std::thread;
 use ta::{Close, High, Low, Open, Tbbav, Tbqav};
-
+use crate::common::signal::TradingSignal;
 pub struct IdGenerator {
     base: u64,
     range_size: u64,
@@ -31,6 +31,12 @@ impl IdGenerator {
         let seq = self.counter.fetch_add(1, Ordering::Relaxed);
         self.base + (seq % self.range_size)
     }
+}
+pub struct SymbolStrategyManager<T: Close + High + Open + Low + Tbbav + Tbqav + Send + Sync + 'static>{
+    symbol: String,
+    strategies: Vec<StrategyEnum>,
+    data_receiver: mpsc::Receiver<Arc<T>>,
+    signal_sender: mpsc::Sender<Signal>,
 }
 
 // 使用枚举来支持不同的策略类型
@@ -81,7 +87,7 @@ where
 
     fn on_kline_update(&mut self, input: Arc<T>) -> Signal {
         match self {
-            StrategyEnum::Macd(strategy) => strategy.on_kline_update(input),
+            StrategyEnum::Macd(strategy) => strategy.on_kline_update(input.as_ref()),
             // StrategyEnum::Rsi(strategy) => strategy.on_kline_update(input),
             // StrategyEnum::Bollinger(strategy) => strategy.on_kline_update(input),
         }

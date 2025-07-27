@@ -1,4 +1,4 @@
-use super::enums::{Exchange, Strategy};
+use super::enums::{Exchange, StrategyName};
 use super::utils::get_timestamp_ms;
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -27,7 +27,7 @@ pub struct MarketSignal {
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct LimitSignal {
-    pub side: Side,
+    pub side: Option<PositionSide>,
     pub quantity: f64,
     pub price: f64,
 }
@@ -38,10 +38,10 @@ pub enum Signal {
     Limit(LimitSignal),
 }
 #[derive(Debug, Clone, PartialEq)]
-struct TradingSignal {
+pub struct TradingSignal {
     id: u32,
     symbol: String,
-    strategy: Strategy,
+    strategy: StrategyName,
     signal: Signal,
     latest_price: f64,
     exchange: Exchange,
@@ -53,7 +53,7 @@ impl TradingSignal {
         id: u32,
         symbol: String,
         side: Side,
-        strategy: Strategy,
+        strategy: StrategyName,
         quantity: f64,
         exchange: Exchange,
         data_timestamp: u32,
@@ -90,7 +90,7 @@ impl MarketSignal {
 }
 
 impl LimitSignal {
-    pub fn new(side: Side, quantity: f64, price: f64) -> Self {
+    pub fn new(side: Option<PositionSide>, quantity: f64, price: f64) -> Self {
         Self {
             side,
             quantity,
@@ -108,7 +108,7 @@ mod test {
             1,
             "BTCUSDT".to_string(),
             Side::Buy,
-            Strategy::MACD,
+            StrategyName::MACD,
             1000.0,
             Exchange::Binance,
             10000000,
