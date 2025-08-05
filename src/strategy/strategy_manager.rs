@@ -1,6 +1,6 @@
 use crate::common::ts::Strategy;
 use crate::strategy::common::Signal;
-use crate::strategy::macd::MacdStrategy;
+use crate::strategy::hbfc::MacdStrategy;
 use anyhow::Result;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};

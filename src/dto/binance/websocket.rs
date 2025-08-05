@@ -1,30 +1,32 @@
+use crate::common::Exchange;
+use crate::common::ts::MarketData;
 use serde::{Deserialize, Serialize};
-use serde_with::{serde_as, DisplayFromStr};
-use ta::{Open, High, Low, Close, Volume, Qav, Tbqav, Not, Tbbav};
-
+use serde_with::{DisplayFromStr, serde_as};
+use ta::{Close, High, Low, Not, Open, Qav, Tbbav, Tbqav, Volume};
+use crate::common::ts::IsClosed;
 /// 标记价格数据 - 使用 serde_with 自动转换字符串到数值
 #[serde_as]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MarkPriceData {
     pub symbol: String,
-    
+
     #[serde_as(as = "DisplayFromStr")]
     pub mark_price: f64, // 标记价格 (auto-converted from string)
-    
+
     #[serde_as(as = "DisplayFromStr")]
     pub index_price: f64, // 指数价格 (auto-converted from string)
-    
+
     #[serde_as(as = "DisplayFromStr")]
     pub estimated_settle_price: f64, // 预估结算价 (auto-converted from string)
-    
+
     #[serde_as(as = "DisplayFromStr")]
     pub last_funding_rate: f64, // 最新资金费率 (auto-converted from string)
-    
+
     pub next_funding_time: i64, // 下次资金费时间
-    
+
     #[serde_as(as = "DisplayFromStr")]
     pub interest_rate: f64, // 利率 (auto-converted from string)
-    
+
     pub time: i64, // 时间戳
 }
 
@@ -176,6 +178,12 @@ pub struct KlineInfo {
 // }
 
 // 为 KlineInfo 实现 ta-rs 的 trait - 现在直接使用字段
+
+impl MarketData for KlineInfo {
+    fn which_exchange(&self) -> Exchange {
+        Exchange::Binance
+    }
+}
 impl Open for KlineInfo {
     fn open(&self) -> f64 {
         self.open_price
@@ -209,22 +217,14 @@ impl Volume for KlineInfo {
 impl Qav for KlineInfo {
     fn qav(&self) -> Option<f64> {
         let volume = self.quote_volume;
-        if volume == 0.0 {
-            None
-        } else {
-            Some(volume)
-        }
+        if volume == 0.0 { None } else { Some(volume) }
     }
 }
 
 impl Tbqav for KlineInfo {
     fn tbqav(&self) -> Option<f64> {
         let volume = self.taker_buy_quote_volume;
-        if volume == 0.0 {
-            None
-        } else {
-            Some(volume)
-        }
+        if volume == 0.0 { None } else { Some(volume) }
     }
 }
 
@@ -232,17 +232,19 @@ impl Tbqav for KlineInfo {
 impl Tbbav for KlineInfo {
     fn tbbav(&self) -> Option<f64> {
         let volume = self.taker_buy_base_volume;
-        if volume == 0.0 {
-            None
-        } else {
-            Some(volume)
-        }
+        if volume == 0.0 { None } else { Some(volume) }
     }
 }
 
 impl Not for KlineInfo {
     fn not(&self) -> Option<u64> {
         Some(self.trade_count)
+    }
+}
+
+impl IsClosed for KlineInfo {
+    fn is_closed(&self) -> bool {
+        self.is_closed
     }
 }
 
@@ -327,7 +329,7 @@ mod tests {
 
         let result: Result<KlineInfo, _> = serde_json::from_str(json_str);
         assert!(result.is_ok(), "应该成功解析，忽略多余字段");
-        
+
         let kline = result.unwrap();
         assert_eq!(kline.symbol, "BTCUSDT");
         assert_eq!(kline.open_price, 0.0010);
@@ -411,17 +413,18 @@ mod tests {
         assert_eq!(data.event_type, "depthUpdate");
         assert_eq!(data.bids.len(), 2);
         assert_eq!(data.asks.len(), 2);
-        
+
         // 测试价格和数量的自动转换
-        assert_eq!(data.bids[0][0], 200.0);  // 价格
+        assert_eq!(data.bids[0][0], 200.0); // 价格
         assert_eq!(data.bids[0][1], 260.401); // 数量
         assert_eq!(data.asks[0][0], 2521.13); // 价格
-        assert_eq!(data.asks[0][1], 37.315);  // 数量
-        
+        assert_eq!(data.asks[0][1], 37.315); // 数量
+
         // 测试便利方法
         assert_eq!(data.best_bid(), Some(200.0));
         assert_eq!(data.best_ask(), Some(2521.13));
         assert_eq!(data.spread(), Some(2321.13));
         assert_eq!(data.mid_price(), Some(1360.565));
     }
-} 
+}
+

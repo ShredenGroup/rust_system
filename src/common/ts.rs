@@ -1,7 +1,7 @@
+use super::Exchange;
 use ndarray::Array;
 use ndarray::Ix2;
-
-pub trait ToArray{
+pub trait ToArray {
     fn to_ndarray(&self) -> Array<f32, Ix2>;
 }
 
@@ -12,10 +12,11 @@ pub trait Strategy<T>: Send + Sync {
     fn name(&self) -> String;
 }
 
-pub trait IsClosed{
+pub trait IsClosed {
     fn is_closed(&self) -> bool;
 }
 
-pub trait MarketData{
+pub trait MarketData {
     fn which_exchange(&self) -> Exchange;
 }
+

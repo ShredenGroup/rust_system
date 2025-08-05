@@ -26,12 +26,14 @@ pub fn generate_hmac_signature(query_string: &str, secret_key: &str) -> String {
 
     hex::encode(code_bytes)
 }
+
 pub fn get_timestamp_ms() -> u64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .unwrap()
         .as_millis() as u64
 }
+
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -76,3 +76,7 @@ path = "src/bin/macd_signal_test.rs"
 [[bin]]
 name = "strategy_manager_test"
 path = "src/bin/strategy_manager_test.rs"
+
+[[bin]]
+name = "macd_test"
+path = "src/bin/macd_test.rs"
