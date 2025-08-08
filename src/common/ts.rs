@@ -1,6 +1,7 @@
 use super::Exchange;
 use ndarray::Array;
 use ndarray::Ix2;
+use super::StrategyName;
 pub trait ToArray {
     fn to_ndarray(&self) -> Array<f32, Ix2>;
 }
@@ -20,3 +21,6 @@ pub trait MarketData {
     fn which_exchange(&self) -> Exchange;
 }
 
+pub trait SignalTs{
+    fn signal_strategy(&self) -> StrategyName;
+}

@@ -6,4 +6,5 @@ pub mod signal;
 pub mod ts;
 pub mod utils;
 pub use enums::Exchange;
+pub use enums::StrategyName;
 pub mod order;

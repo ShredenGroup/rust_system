@@ -1,3 +1,16 @@
 pub const BINANCE_BASE_URL: &str = "https://api.binance.com/api";
 pub const BINANCE_FUTURES_URL: &str = "https://fapi.binance.com/fapi/v1";
 pub const BINANCE_WS: &str = "wss://fstream.binance.com/ws";
+pub const BTC_USDT_SYMBOL: &str = "BTCUSDT";
+pub const ETH_USDT_SYMBOL: &str = "ETHUSDT";
+pub const SOL_USDT_SYMBOL: &str = "SOLUSDT";
+pub const ADA_USDT_SYMBOL: &str = "ADAUSDT";
+pub const XRP_USDT_SYMBOL: &str = "XRPUSDT";
+pub const DOGE_USDT_SYMBOL: &str = "DOGEUSDT";
+pub const TURBO_USDT_SYMBOL: &str = "TURBOUSDT";
+pub const BUY: &str = "BUY";
+pub const SELL: &str = "SELL";
+pub const LONG: &str = "LONG";
+pub const SHORT: &str = "SHORT";
+pub const CLOSE: &str = "CLOSE";
+pub const OPEN: &str = "OPEN";

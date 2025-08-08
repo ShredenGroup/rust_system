@@ -1,7 +1,10 @@
+use hmac::digest::consts::True;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use anyhow::Result;
-use ta::{Close,Open,High,Low,Volume,Not,Tbbav,Tbqav,Qav};
+use ta::{Close, High, Low, Not, Open, Qav, Tbbav, Tbqav, Volume};
+use std::str::FromStr;
+use crate::common::ts::IsClosed;
 /// 订单类型枚举
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "SCREAMING_SNAKE_CASE")]
@@ -53,28 +56,47 @@ pub struct KlineData {
     #[serde(rename = "0")]
     pub open_time: i64,
     #[serde(rename = "1")]
+    #[serde(deserialize_with = "deserialize_string_to_f64")]
     pub open: f64,
     #[serde(rename = "2")]
+    #[serde(deserialize_with = "deserialize_string_to_f64")]
     pub high: f64,
     #[serde(rename = "3")]
+    #[serde(deserialize_with = "deserialize_string_to_f64")]
     pub low: f64,
     #[serde(rename = "4")]
+    #[serde(deserialize_with = "deserialize_string_to_f64")]
     pub close: f64,
     #[serde(rename = "5")]
+    #[serde(deserialize_with = "deserialize_string_to_f64")]
     pub volume: f64,
     #[serde(rename = "6")]
     pub close_time: i64,
     #[serde(rename = "7")]
+    #[serde(deserialize_with = "deserialize_string_to_f64")]
     pub quote_volume: f64,
     #[serde(rename = "8")]
     pub trades_count: u64,
     #[serde(rename = "9")]
+    #[serde(deserialize_with = "deserialize_string_to_f64")]
     pub taker_buy_volume: f64,
     #[serde(rename = "10")]
+    #[serde(deserialize_with = "deserialize_string_to_f64")]
     pub taker_buy_quote_volume: f64,
     #[serde(rename = "11")]
+    #[serde(deserialize_with = "deserialize_string_to_f64")]
     pub ignore: f64,
 }
+
+/// 辅助函数：将字符串反序列化为 f64
+fn deserialize_string_to_f64<'de, D>(deserializer: D) -> Result<f64, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let s = String::deserialize(deserializer)?;
+    f64::from_str(&s).map_err(serde::de::Error::custom)
+}
+
 // 为 KlineInfo 实现 ta-rs 的 trait
 impl Open for KlineData {
     fn open(&self) -> f64 {
@@ -136,6 +158,11 @@ impl Not for KlineData {
         Some(self.trades_count)
     }
 }
+impl IsClosed for KlineData{
+    fn is_closed(&self) -> bool {
+        true
+    }
+} 
 /// K线数据响应类型别名
 pub type KlineResponse = Vec<KlineData>;
 
@@ -321,7 +348,7 @@ mod tests {
     }
 
     #[test]
-    fn test_kline_data_parsing() {
+    fn test_kline_data_string_parsing() {
         let json_str = r#"[
             1640995200000,
             "50000.00",
@@ -334,7 +361,7 @@ mod tests {
             1000,
             "600.00",
             "30150000.00",
-            "0"
+            "0.00"
         ]"#;
 
         let kline: KlineData = serde_json::from_str(json_str).unwrap();
@@ -344,5 +371,9 @@ mod tests {
         assert_eq!(kline.low, 49000.0);
         assert_eq!(kline.close, 50500.0);
         assert_eq!(kline.volume, 1000.0);
+        assert_eq!(kline.quote_volume, 50250000.0);
+        assert_eq!(kline.taker_buy_volume, 600.0);
+        assert_eq!(kline.taker_buy_quote_volume, 30150000.0);
+        assert_eq!(kline.ignore, 0.0);
     }
 } 

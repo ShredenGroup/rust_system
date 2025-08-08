@@ -1,13 +1,13 @@
-use crate::common::ts::Strategy;
-use crate::strategy::common::Signal;
-use crate::strategy::hbfc::MacdStrategy;
+use crate::common::ts::{Strategy,IsClosed};
+use crate::common::signal::TradingSignal;
+use crate::strategy::macd::MacdStrategy;
 use anyhow::Result;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::mpsc;
 use std::thread;
 use ta::{Close, High, Low, Open, Tbbav, Tbqav};
-use crate::common::signal::TradingSignal;
+
 pub struct IdGenerator {
     base: u64,
     range_size: u64,
@@ -26,20 +26,19 @@ impl IdGenerator {
         })
     }
 
-    // 🟢 最简版本 - 开销最小
     pub fn next_id(&self) -> u64 {
         let seq = self.counter.fetch_add(1, Ordering::Relaxed);
         self.base + (seq % self.range_size)
     }
 }
-pub struct SymbolStrategyManager<T: Close + High + Open + Low + Tbbav + Tbqav + Send + Sync + 'static>{
+
+pub struct SymbolStrategyManager<T: Close + High + Open + Low + Tbbav + Tbqav + Send + Sync + IsClosed + 'static> {
     symbol: String,
     strategies: Vec<StrategyEnum>,
     data_receiver: mpsc::Receiver<Arc<T>>,
-    signal_sender: mpsc::Sender<Signal>,
+    signal_sender: mpsc::Sender<Option<TradingSignal>>,
 }
 
-// 使用枚举来支持不同的策略类型
 #[derive(Clone)]
 pub enum StrategyEnum {
     Macd(MacdStrategy),
@@ -48,24 +47,21 @@ pub enum StrategyEnum {
     // Bollinger(BollingerStrategy),
 }
 
-// 为 StrategyEnum 实现 Strategy trait
 impl<T> Strategy<&T> for StrategyEnum
 where
-    T: High + Low + Close + Open + Tbbav + Tbqav,
+    T: High + Low + Close + Open + Tbbav + Tbqav + IsClosed,
 {
-    type Output = Signal;
+    type Output = Option<TradingSignal>;
 
-    fn on_kline_update(&mut self, input: &T) -> Signal {
+    fn on_kline_update(&mut self, input: &T) -> Self::Output {
         match self {
             StrategyEnum::Macd(strategy) => strategy.on_kline_update(input),
-            // StrategyEnum::Rsi(strategy) => strategy.on_kline_update(input),
-            // StrategyEnum::Bollinger(strategy) => strategy.on_kline_update(input),
         }
     }
+
     fn name(&self) -> String {
-        match self{
+        match self {
             StrategyEnum::Macd(_) => "MACD".to_string(),
-            // StrategyEnum::Rsi(_) => "RSI".to_string(),
         }
     }
 }
@@ -74,43 +70,38 @@ impl StrategyEnum {
     pub fn name(&self) -> String {
         match self {
             StrategyEnum::Macd(_) => "MACD".to_string(),
-            // StrategyEnum::Rsi(_) => "RSI".to_string(),
         }
     }
 }
 
 impl<T> Strategy<Arc<T>> for StrategyEnum
 where
-    T: High + Low + Close + Open + Tbbav + Tbqav + Send + Sync + 'static,
+    T: High + Low + Close + Open + Tbbav + Tbqav + Send + Sync + IsClosed + 'static,
 {
-    type Output = Signal;
+    type Output = Option<TradingSignal>;
 
-    fn on_kline_update(&mut self, input: Arc<T>) -> Signal {
+    fn on_kline_update(&mut self, input: Arc<T>) -> Self::Output {
         match self {
             StrategyEnum::Macd(strategy) => strategy.on_kline_update(input.as_ref()),
-            // StrategyEnum::Rsi(strategy) => strategy.on_kline_update(input),
-            // StrategyEnum::Bollinger(strategy) => strategy.on_kline_update(input),
         }
     }
 
     fn name(&self) -> String {
         match self {
             StrategyEnum::Macd(_) => "MACD".to_string(),
-            // StrategyEnum::Rsi(_) => "RSI".to_string(),
         }
     }
 }
 
-// 修改 StrategyManager 以使用枚举
-pub struct StrategyManager<T: Close + High + Open + Low + Tbbav + Tbqav + Send + Sync + 'static> {
+pub struct StrategyManager<T: Close + High + Open + Low + Tbbav + Tbqav + Send + Sync + IsClosed + 'static> {
     strategies: Vec<StrategyEnum>,
     data_receiver: mpsc::Receiver<Arc<T>>,
-    data_sender: mpsc::Sender<Signal>,
+    data_sender: mpsc::Sender<Option<TradingSignal>>,
     next_id: Arc<AtomicU64>,
 }
 
-impl<T: Close + High + Open + Low + Tbbav + Tbqav + Send + Sync + 'static> StrategyManager<T> {
-    pub fn new(data_receiver: mpsc::Receiver<Arc<T>>, data_sender: mpsc::Sender<Signal>) -> Self {
+impl<T: Close + High + Open + Low + Tbbav + Tbqav + Send + Sync + IsClosed + 'static> StrategyManager<T> {
+    pub fn new(data_receiver: mpsc::Receiver<Arc<T>>, data_sender: mpsc::Sender<Option<TradingSignal>>) -> Self {
         Self {
             strategies: Vec::new(),
             data_receiver,
@@ -124,20 +115,15 @@ impl<T: Close + High + Open + Low + Tbbav + Tbqav + Send + Sync + 'static> Strat
     }
 
     pub fn run_single_strategy(&mut self, strategy_name: String) -> Result<()> {
-        // 找到对应的策略
         let strategy_index = self.strategies.iter()
             .position(|s| s.name() == strategy_name)
             .ok_or_else(|| anyhow::anyhow!("Strategy '{}' not found", strategy_name))?;
         
         let mut strategy = self.strategies[strategy_index].clone();
         let data_sender = self.data_sender.clone();
-        let _next_id = self.next_id.clone();
 
-        // 在当前线程中运行策略（简化版本）
         while let Ok(data) = self.data_receiver.recv() {
             let signal = strategy.on_kline_update(data);
-            
-            // 直接发送原始信号，不进行检查
             if let Err(e) = data_sender.send(signal) {
                 eprintln!("Failed to send signal: {}", e);
                 break;
@@ -154,9 +140,8 @@ impl<T: Close + High + Open + Low + Tbbav + Tbqav + Send + Sync + 'static> Strat
         while let Ok(data) = self.data_receiver.recv() {
             for strategy in &mut strategies {
                 let signal = strategy.on_kline_update(data.clone());
-                
-                if signal.is_actionable() {
-                    if let Err(e) = data_sender.send(signal) {
+                if let Some(signal) = signal {
+                    if let Err(e) = data_sender.send(Some(signal)) {
                         eprintln!("Failed to send signal: {}", e);
                         break;
                     }
@@ -192,7 +177,7 @@ mod tests {
         let (signal_tx, _signal_rx) = mpsc::channel();
         
         let mut manager: StrategyManager<KlineInfo> = StrategyManager::new(data_rx, signal_tx);
-        let macd_strategy = MacdStrategy::new(20).unwrap();
+        let macd_strategy = MacdStrategy::new(12, 26, 9).unwrap();
         
         manager.add_strategy(StrategyEnum::Macd(macd_strategy));
         assert_eq!(manager.strategies.len(), 1);
@@ -201,7 +186,7 @@ mod tests {
 
     #[test]
     fn test_strategy_enum_name() {
-        let macd_strategy = MacdStrategy::new(10).unwrap();
+        let macd_strategy = MacdStrategy::new(12, 26, 9).unwrap();
         let strategy_enum = StrategyEnum::Macd(macd_strategy);
         assert_eq!(strategy_enum.name(), "MACD");
     }
@@ -220,10 +205,9 @@ mod tests {
         let (signal_tx, signal_rx) = mpsc::channel();
         
         let mut manager: StrategyManager<KlineInfo> = StrategyManager::new(data_rx, signal_tx);
-        let macd_strategy = MacdStrategy::new(5).unwrap();
+        let macd_strategy = MacdStrategy::new(12, 26, 9).unwrap();
         manager.add_strategy(StrategyEnum::Macd(macd_strategy));
 
-        // 创建测试数据
         let test_kline = Arc::new(KlineInfo {
             start_time: 1638747660000,
             close_time: 1638747719999,
@@ -244,11 +228,9 @@ mod tests {
             ignore: "ignore".to_string(),
         });
 
-        // 发送测试数据
         data_tx.send(test_kline).unwrap();
-        drop(data_tx); // 关闭发送端
+        drop(data_tx);
 
-        // 运行策略（这会阻塞直到数据处理完成）
         let result = manager.run_single_strategy("MACD".to_string());
         assert!(result.is_ok());
     }

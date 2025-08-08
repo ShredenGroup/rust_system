@@ -1,5 +1,6 @@
 use super::enums::{Exchange, StrategyName};
 use super::utils::get_timestamp_ms;
+use super::ts::SignalTs;
 #[derive(Debug, Clone, Copy, PartialEq)]
 #[repr(u8)]
 pub enum Side {
@@ -35,13 +36,13 @@ pub enum Signal {
 }
 #[derive(Debug, Clone, PartialEq)]
 pub struct TradingSignal {
-    id: u32,
-    symbol: String,
-    strategy: StrategyName,
-    quantity: f64,
-    signal: Signal,
-    side: Side,
-    latest_price: f64,
+    pub id: u32,
+    pub symbol: String,
+    pub strategy: StrategyName,
+    pub quantity: f64,
+    pub signal: Signal,
+    pub side: Side,
+    pub latest_price: f64,
     exchange: Exchange,
     data_timestamp: u32,
     timestamp: u64,
@@ -72,6 +73,11 @@ impl TradingSignal {
             timestamp: get_timestamp_ms(),
             strategy,
         }
+    }
+}
+impl SignalTs for TradingSignal{
+    fn signal_strategy(&self) -> StrategyName {
+        self.strategy
     }
 }
 impl MarketSignal {
