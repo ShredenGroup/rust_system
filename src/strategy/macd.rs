@@ -64,10 +64,10 @@ where
             if is_golden_cross {
                 Some(TradingSignal::new_market_signal(
                     1,                      // hardcoded id
-                    BTC_USDT_SYMBOL.to_string(), 
+                    TURBO_USDT_SYMBOL.to_string(), 
                     Side::Buy,             // 金叉买入
                     StrategyName::MACD,
-                    0.01,                  // 固定数量
+                    10000.0,                  // 固定数量
                     Exchange::Binance,
                     get_timestamp_ms() as u32,
                     None,                  // 不设止盈
@@ -77,10 +77,10 @@ where
             } else if is_death_cross {
                 Some(TradingSignal::new_market_signal(
                     1,                      // hardcoded id
-                    "BTCUSDT".to_string(),
+                    TURBO_USDT_SYMBOL.to_string(),
                     Side::Sell,            // 死叉卖出
                     StrategyName::MACD,
-                    0.01,                  // 固定数量
+                    10000.0,                  // 固定数量
                     Exchange::Binance,
                     get_timestamp_ms() as u32,
                     None,                  // 不设止盈

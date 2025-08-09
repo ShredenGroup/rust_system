@@ -6,11 +6,12 @@ pub enum Exchange {
     MEXC = 2,
 }
 
-#[derive(Debug, Clone, PartialEq,Copy)]
+#[derive(Debug, Clone, PartialEq,Copy,Hash,Eq)]
 #[repr(u8)]
 pub enum StrategyName {
     MACD = 0,
     HBFC = 1,
+    BOLLINGER = 2,
 }
 
 #[derive(Debug, Clone, PartialEq)]

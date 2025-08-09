@@ -1,154 +1,157 @@
 use crate::common::enums::{Exchange, OrderStutus, StrategyName};
-use crate::common::signal::TradingSignal;
-use std::any;
+use crate::common::signal::{TradingSignal, Side};
+use crate::exchange_api::binance::api::BinanceFuturesApi;
+use crate::dto::binance::rest_api::{OrderRequest, OrderSide, OrderType};
 use std::collections::HashMap;
 use std::sync::Arc;
-use tokio::sync::{RwLock,mpsc};
+use tokio::sync::{RwLock, mpsc};
 use anyhow::Result;
-type TokenName=String;
 
-// pub struct OpenPosition {
-//     pub position: HashMap<(TokenName,Exchange), f64>,
-//     pub strategy_name: StrategyName,
-// }
 pub struct SignalManager {
     pub open_position: Arc<RwLock<HashMap<StrategyName, f64>>>,
     pub signal_receiver: mpsc::Receiver<TradingSignal>,
-}
-impl SignalManager{
-
-}
-fn macd_filter(signal:TradingSignal,current_position:f64) ->Result<(),anyhow::Error>{
-
-}
-// pub struct Order {
-//     pub order_id: usize,
-//     pub exchange: Exchange,
-//     pub symbol: String,
-//     pub amount: f64,
-//     pub strategy: StrategyName,
-//     pub status: OrderStutus,
-//     pub timestamp: u64,
-//     pub updated_timestamp: u64,
-// }
-
-// 首先定义 Filter trait
-pub trait SignalFilter: Send + Sync {
-    fn filter(&self, signal: &TradingSignal, positions: &HashMap<(Exchange, TokenName), f64>) -> bool;
-    fn name(&self) -> String;
+    binance_client: BinanceFuturesApi,
 }
 
-// 定义一些具体的 Filter
-#[derive(Clone)]
-pub struct MacdFilter {
-    max_position: f64,
-    min_position: f64,
-}
-
-impl SignalFilter for MacdFilter {
-    fn filter(&self, signal: &TradingSignal, positions: &HashMap<(Exchange, TokenName), f64>) -> bool {
-        // MACD 策略特定的过滤逻辑
-        // 例如：检查持仓限制，检查信号强度等
-        true
-    }
-
-    fn name(&self) -> String {
-        "MACD".to_string()
-    }
-}
-
-// Filter 管理器
-pub struct FilterManager {
-    filters: HashMap<StrategyName, Box<dyn SignalFilter>>,
-    positions: Arc<RwLock<HashMap<(Exchange, TokenName), f64>>>,
-    signal_receiver: mpsc::Receiver<TradingSignal>,
-    order_sender: mpsc::Sender<Order>,
-}
-
-impl FilterManager {
+impl SignalManager {
     pub fn new(
         signal_receiver: mpsc::Receiver<TradingSignal>,
-        order_sender: mpsc::Sender<Order>,
-        positions: Arc<RwLock<HashMap<(Exchange, TokenName), f64>>>,
+        open_position: Arc<RwLock<HashMap<StrategyName, f64>>>,
+        api_key: String,
+        secret_key: String,
     ) -> Self {
+        let binance_client = BinanceFuturesApi::new(api_key, secret_key);
         Self {
-            filters: HashMap::new(),
-            positions,
+            open_position,
             signal_receiver,
-            order_sender,
+            binance_client,
         }
     }
 
-    pub fn add_filter(&mut self, strategy: StrategyName, filter: Box<dyn SignalFilter>) {
-        self.filters.insert(strategy, filter);
-    }
-
-    pub fn process_signals(&mut self) -> Result<()> {
-        while let Ok(signal) = self.signal_receiver.recv() {
-            // 1. 获取对应策略的 filter
-            if let Some(filter) = self.filters.get(&signal.strategy) {
-                // 2. 获取当前持仓信息
-                let positions = self.positions.read().unwrap();
-                
-                // 3. 应用过滤规则
-                if filter.filter(&signal, &positions) {
-                    // 4. 创建订单
-                    let order = Order {
-                        order_id: self.generate_order_id(),
-                        exchange: signal.exchange,
-                        symbol: signal.symbol,
-                        amount: signal.amount,
-                        strategy: signal.strategy,
-                        status: OrderStatus::New,
-                        timestamp: get_timestamp_ms() as u64,
-                        updated_timestamp: get_timestamp_ms() as u64,
-                    };
-
-                    // 5. 发送订单
-                    self.order_sender.send(order)?;
+    pub async fn process_signals(&mut self) -> Result<()> {
+        // 使用多个任务并发处理信号
+        while let Some(signal) = self.signal_receiver.recv().await {
+            // 克隆需要的数据用于新任务
+            let open_position = self.open_position.clone();
+            let client = self.binance_client.clone();
+            
+            // 启动新的任务处理信号
+            tokio::spawn(async move {
+                if let Err(e) = Self::process_single_signal(signal, open_position, client).await {
+                    eprintln!("Signal processing error: {}", e);
                 }
-            }
+            });
         }
         Ok(())
     }
-}
 
-// 全局风控过滤器（可选）
-pub struct GlobalRiskFilter {
-    max_total_position: f64,
-    max_single_order: f64,
-}
+    async fn process_single_signal(
+        signal: TradingSignal,
+        open_position: Arc<RwLock<HashMap<StrategyName, f64>>>,
+        client: BinanceFuturesApi,
+    ) -> Result<()> {
+        let strategy = signal.strategy;
 
-impl SignalFilter for GlobalRiskFilter {
-    fn filter(&self, signal: &TradingSignal, positions: &HashMap<(Exchange, TokenName), f64>) -> bool {
-        // 实现全局风控规则
-        true
+        // 1. 先检查并更新仓位（乐观锁模式）
+        {
+            let mut positions = open_position.write().await;
+            let current_position = positions.get(&strategy).copied().unwrap_or(0.0);
+            
+            // 如果已有仓位，拒绝信号
+            if current_position != 0.0 {
+                println!(
+                    "Signal rejected: Current position: {}, Symbol: {}", 
+                    current_position, 
+                    signal.symbol
+                );
+                return Ok(());
+            }
+
+            // 乐观地更新仓位
+            positions.insert(strategy, signal.quantity);
+        }
+
+        // 2. 准备下单请求
+        let order_side = match signal.side {
+            Side::Buy => OrderSide::Buy,
+            Side::Sell => OrderSide::Sell,
+        };
+
+        let order_request = OrderRequest {
+            symbol: signal.symbol.clone(),
+            side: order_side,
+            order_type: OrderType::Market,
+            quantity: Some(signal.quantity.to_string()),
+            timestamp: Some(BinanceFuturesApi::get_timestamp()),
+            recv_window: Some(60000),
+            ..Default::default()
+        };
+
+        // 3. 发送订单（异步）
+        match client.new_order(order_request).await {
+            Ok(response) => {
+                println!(
+                    "Order placed successfully: Symbol: {}, Side: {:?}, Quantity: {}, OrderId: {}", 
+                    signal.symbol, 
+                    signal.side,
+                    signal.quantity,
+                    response.order_id
+                );
+                Ok(())
+            }
+            Err(e) => {
+                // 下单失败，回滚仓位
+                let mut positions = open_position.write().await;
+                positions.remove(&strategy);
+                
+                eprintln!("Failed to place order: {}", e);
+                Err(anyhow::anyhow!("Failed to place order: {}", e))
+            }
+        }
     }
-
-    fn name(&self) -> String {
-        "GlobalRisk".to_string()
-    }
 }
 
-// 使用示例
-pub fn setup_filter_manager() -> Result<FilterManager> {
-    let (signal_tx, signal_rx) = mpsc::channel();
-    let (order_tx, order_rx) = mpsc::channel();
-    let positions = Arc::new(RwLock::new(HashMap::new()));
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::common::signal::{Side, Signal, MarketSignal};
+    
+    #[tokio::test]
+    async fn test_concurrent_signal_processing() {
+        let api_key = std::env::var("BINANCE_API_KEY").expect("Missing BINANCE_API_KEY");
+        let secret_key = std::env::var("BINANCE_SECRET_KEY").expect("Missing BINANCE_SECRET_KEY");
+        
+        let (signal_tx, signal_rx) = mpsc::channel(100);
+        let positions = Arc::new(RwLock::new(HashMap::new()));
+        
+        let mut manager = SignalManager::new(
+            signal_rx, 
+            positions.clone(),
+            api_key,
+            secret_key,
+        );
 
-    let mut filter_manager = FilterManager::new(signal_rx, order_tx, positions);
+        // 创建多个测试信号
+        let test_signals = vec![
+            TradingSignal::new_market_signal(
+                1, "BTCUSDT".to_string(), Side::Buy, StrategyName::MACD,
+                0.001, Exchange::Binance, 0, None, None, 50000.0,
+            ),
+            TradingSignal::new_market_signal(
+                2, "ETHUSDT".to_string(), Side::Buy, StrategyName::HBFC,
+                0.01, Exchange::Binance, 0, None, None, 3000.0,
+            ),
+        ];
 
-    // 添加 MACD 策略的过滤器
-    filter_manager.add_filter(
-        StrategyName::MACD,
-        Box::new(MacdFilter {
-            max_position: 1.0,
-            min_position: -1.0,
-        })
-    );
+        // 并发发送信号
+        for signal in test_signals {
+            let signal_tx = signal_tx.clone();
+            tokio::spawn(async move {
+                signal_tx.send(signal).await.unwrap();
+            });
+        }
 
-    // 可以添加其他策略的过滤器
-    // filter_manager.add_filter(StrategyName::RSI, Box::new(RsiFilter::new()));
-
-    Ok(filter_manager)
+        // 运行信号处理
+        manager.process_signals().await.unwrap();
+    }
 }
