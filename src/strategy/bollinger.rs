@@ -114,7 +114,7 @@ where
                             close_price,
                         ));
                     } else if close_price <= lower_band {
-                        // 触及下轨，做多
+                        // 触及下轨，做多.
                         let stop_price = close_price - (2.0 * atr_value);
                         self.current_signal = 1;  // 设置为多头状态
                         self.last_price = close_price;
