@@ -21,3 +21,10 @@ pub enum OrderStutus {
     Failed,
     Canceled,
 }
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum PositionSide {
+    Long = 1,
+    Short = 2,
+    NoPosition = 0,
+}

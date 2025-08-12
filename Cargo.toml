@@ -64,6 +64,7 @@ rayon = "1.8"
 # Technical Analysis
 ta = {path="../ta-rs"}
 serde_with = "3.14.0"
+tracing-appender = "0.2.3"
 
 [[bin]]
 name = "rust_system"

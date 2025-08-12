@@ -74,6 +74,37 @@ impl TradingSignal {
             strategy,
         }
     }
+    
+    // 添加新的生成平仓信号的方法
+    pub fn new_close_signal(
+        id: u32,
+        symbol: String,
+        current_position: u8,  // 0: 无仓位, 1: 多头, 2: 空头
+        strategy: StrategyName,
+        quantity: f64,
+        exchange: Exchange,
+        latest_price: f64,
+    ) -> Self {
+        // 根据当前持仓方向决定平仓方向
+        let close_side = match current_position {
+            1 => Side::Sell,  // 持有多头，需要卖出平仓
+            2 => Side::Buy,   // 持有空头，需要买入平仓
+            _ => panic!("Unexpected state: generating close signal without position"),
+        };
+
+        Self {
+            id,
+            symbol,
+            strategy,
+            quantity,
+            side: close_side,
+            signal: Signal::Market(MarketSignal::new(close_side, None, None)),
+            latest_price,
+            exchange,
+            data_timestamp: get_timestamp_ms() as u32,
+            timestamp: get_timestamp_ms(),
+        }
+    }
 }
 impl SignalTs for TradingSignal{
     fn signal_strategy(&self) -> StrategyName {
