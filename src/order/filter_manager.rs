@@ -75,43 +75,42 @@ impl SignalManager {
     ) -> Result<()> {
         let strategy = signal.strategy;
 
-        // 1. 先检查并更新仓位（乐观锁模式）
+        // 1. 直接更新仓位（不再检查是否已有仓位）
         {
             let mut positions = open_position.write().await;
-            let current_position = positions.get(&strategy).copied().unwrap_or(0.0);
             
-            // 如果已有仓位，拒绝信号
-            if current_position != 0.0 {
-                println!(
-                    "Signal rejected: Current position: {}, Symbol: {}", 
-                    current_position, 
-                    signal.symbol
-                );
-                return Ok(());
+            // 检查信号类型
+            if let crate::common::signal::Signal::Market(market_signal) = &signal.signal {
+                if market_signal.is_closed {
+                    // 平仓信号：设置仓位为 0
+                    positions.insert(strategy, 0.0);
+                    println!("📤 处理平仓信号: 策略 {:?}, 设置仓位为 0", strategy);
+                } else {
+                    // 开仓信号：设置仓位
+                    positions.insert(strategy, signal.quantity);
+                    println!("📤 处理开仓信号: 策略 {:?}, 设置仓位为 {}", strategy, signal.quantity);
+                }
+            } else {
+                // 其他类型信号：设置仓位
+                positions.insert(strategy, signal.quantity);
+                println!("📤 处理其他信号: 策略 {:?}, 设置仓位为 {}", strategy, signal.quantity);
             }
-
-            // 乐观地更新仓位
-            positions.insert(strategy, signal.quantity);
         }
 
-        // 2. 使用新的 signal_to_order 函数处理信号
+        // 2. 执行订单
         match client.signal_to_order(&signal).await {
             Ok(order_ids) => {
-                println!(
-                    "Orders placed successfully: Symbol: {}, Side: {:?}, Quantity: {}, OrderIds: {:?}", 
-                    signal.symbol, 
-                    signal.side,
-                    signal.quantity,
-                    order_ids
-                );
+                println!("✅ 订单执行成功: 策略 {:?}, 交易对: {}, 方向: {:?}, 数量: {}, 订单ID: {:?}", 
+                         strategy, signal.symbol, signal.side, signal.quantity, order_ids);
                 Ok(())
             }
             Err(e) => {
-                // 下单失败，回滚仓位
+                // 订单执行失败，回滚仓位
                 let mut positions = open_position.write().await;
                 positions.remove(&strategy);
+                println!("❌ 订单执行失败，移除仓位: 策略 {:?}", strategy);
                 
-                eprintln!("Failed to place orders: {}", e);
+                eprintln!("❌ 订单执行失败: {}", e);
                 Err(anyhow::anyhow!("Failed to place orders: {}", e))
             }
         }
@@ -121,7 +120,7 @@ impl SignalManager {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::common::signal::Side;
+    use crate::common::signal::{Side, Signal, MarketSignal};
     use crate::common::config::user_config::load_binance_user_config;
     
     #[tokio::test]
@@ -372,6 +371,151 @@ mod tests {
         } else {
             let error = result.unwrap_err();
             println!("❌ process_signals 重复信号拒绝测试失败: {}", error);
+            panic!("测试失败：{}", error);
+        }
+    }
+
+    #[tokio::test]
+    async fn test_process_signals_close_position() {
+        // 加载用户配置
+        let user_config = load_binance_user_config().expect("Failed to load user config");
+        
+        let (signal_tx, signal_rx) = mpsc::channel(100);
+        let positions = Arc::new(RwLock::new(HashMap::new()));
+        
+        let mut manager = SignalManager::new(
+            signal_rx, 
+            positions.clone(),
+            user_config.api_key.clone(),
+            user_config.secret_key.clone(),
+        );
+
+        // 先设置一个仓位（模拟已有持仓）
+        {
+            let mut positions_guard = positions.write().await;
+            positions_guard.insert(StrategyName::BOLLINGER, 10000.0);
+            println!("📊 初始仓位设置: 策略 {:?}, 数量: 10000.0", StrategyName::BOLLINGER);
+        }
+
+        // 创建平仓信号：卖出平多（使用现有的构造方法）
+        let close_signal = TradingSignal::new_close_signal(
+            1,                                    // id
+            "TURBOUSDT".to_string(),             // symbol
+            1,                                    // current_position: 1 表示多头
+            StrategyName::BOLLINGER,             // strategy
+            10000.0,                             // quantity
+            Exchange::Binance,                   // exchange
+            0.5,                                 // latest_price
+        );
+
+        println!("🧪 开始测试 process_signals 平仓信号功能...");
+        println!("📊 测试信号详情:");
+        println!("   交易对: {}", close_signal.symbol);
+        println!("   方向: {:?}", close_signal.side);
+        println!("   数量: {}", close_signal.quantity);
+        println!("   策略: {:?}", close_signal.strategy);
+        println!("   信号类型: 平仓信号 (is_closed = true)");
+        println!("   当前仓位: 10000.0");
+
+        // 发送平仓信号
+        signal_tx.send(close_signal).await.unwrap();
+        
+        // 关闭发送端，让接收端知道没有更多信号
+        drop(signal_tx);
+
+        // 运行信号处理
+        let result = manager.process_signals().await;
+        
+        if result.is_ok() {
+            println!("✅ process_signals 平仓信号测试成功！");
+            
+            // 等待一段时间让异步任务完成
+            tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
+            
+            // 验证仓位是否被正确设置为 0（平仓后）
+            let positions_guard = positions.read().await;
+            if let Some(position) = positions_guard.get(&StrategyName::BOLLINGER) {
+                println!("📊 仓位更新成功: 策略 {:?}, 数量: {}", StrategyName::BOLLINGER, position);
+                assert_eq!(*position, 0.0, "平仓后仓位应该为 0");
+            } else {
+                println!("❌ 仓位未找到，当前所有仓位: {:?}", *positions_guard);
+                panic!("仓位应该存在且被设置为 0");
+            }
+            
+            println!("🎉 测试通过！成功处理平仓信号并将仓位设置为 0");
+        } else {
+            let error = result.unwrap_err();
+            println!("❌ process_signals 平仓信号测试失败: {}", error);
+            panic!("测试失败：{}", error);
+        }
+    }
+
+    #[tokio::test]
+    async fn test_process_signals_close_position_without_position() {
+        // 加载用户配置
+        let user_config = load_binance_user_config().expect("Failed to load user config");
+        
+        let (signal_tx, signal_rx) = mpsc::channel(100);
+        let positions = Arc::new(RwLock::new(HashMap::new()));
+        
+        let mut manager = SignalManager::new(
+            signal_rx, 
+            positions.clone(),
+            user_config.api_key.clone(),
+            user_config.secret_key.clone(),
+        );
+
+        // 不设置初始仓位（模拟没有持仓的情况）
+
+        // 创建平仓信号：尝试平仓但没有持仓（使用现有的构造方法）
+        let close_signal = TradingSignal::new_close_signal(
+            2,                                    // id
+            "TURBOUSDT".to_string(),             // symbol
+            1,                                    // current_position: 1 表示多头
+            StrategyName::BOLLINGER,             // strategy
+            10000.0,                             // quantity
+            Exchange::Binance,                   // exchange
+            0.5,                                 // latest_price
+        );
+
+        println!("🧪 开始测试 process_signals 无持仓平仓信号功能...");
+        println!("�� 测试信号详情:");
+        println!("   交易对: {}", close_signal.symbol);
+        println!("   方向: {:?}", close_signal.side);
+        println!("   数量: {}", close_signal.quantity);
+        println!("   策略: {:?}", close_signal.strategy);
+        println!("   信号类型: 平仓信号 (is_closed = true)");
+        println!("   当前仓位: 无持仓");
+
+        // 发送平仓信号
+        signal_tx.send(close_signal).await.unwrap();
+        
+        // 关闭发送端，让接收端知道没有更多信号
+        drop(signal_tx);
+
+        // 运行信号处理
+        let result = manager.process_signals().await;
+        
+        if result.is_ok() {
+            println!("✅ process_signals 无持仓平仓信号测试成功！");
+            
+            // 等待一段时间让异步任务完成
+            tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
+            
+            // 验证仓位是否被正确设置为 0
+            let positions_guard = positions.read().await;
+            if let Some(position) = positions_guard.get(&StrategyName::BOLLINGER) {
+                println!("📊 仓位设置成功: 策略 {:?}, 数量: {}", StrategyName::BOLLINGER, position);
+                assert_eq!(*position, 0.0, "平仓信号应该将仓位设置为 0");
+            } else {
+                println!("❌ 仓位未找到，当前所有仓位: {:?}", *positions_guard);
+                panic!("平仓信号应该创建仓位记录并设置为 0");
+            }
+            
+            println!("🎉 测试通过！成功处理无持仓的平仓信号");
+        } else {
+            let error = result.unwrap_err();
+            println!("❌ process_signals 无持仓平仓信号测试失败: {}", error);
             panic!("测试失败：{}", error);
         }
     }

@@ -55,7 +55,7 @@ impl BollingerStrategy {
                 self.last_price = close_price;
                 
                 // 创建平仓信号并标记为平仓操作
-                let mut signal = TradingSignal::new_close_signal(
+                let signal = TradingSignal::new_close_signal(
                     1,
                     TURBO_USDT_SYMBOL.to_string(),
                     position_to_close,  // 使用保存的位置
@@ -65,7 +65,6 @@ impl BollingerStrategy {
                     close_price,
                 );
                 
-                // 在信号中添加布林带信息（通过扩展字段或注释）
                 return Some(signal);
             }
         }
@@ -75,6 +74,9 @@ impl BollingerStrategy {
             if close_price >= upper_band {
                 // 触及上轨，做空
                 let stop_price = close_price + (2.0 * atr_value);
+                // 限制止损价格精度，避免币安精度错误
+                let stop_price = (stop_price * 1000000.0).round() / 1000000.0; // 限制到6位小数
+                
                 self.current_signal = 2;  // 设置为空头状态
                 self.last_price = close_price;
                 return Some(TradingSignal::new_market_signal(
@@ -92,8 +94,12 @@ impl BollingerStrategy {
             } else if close_price <= lower_band {
                 // 触及下轨，做多
                 let stop_price = close_price - (2.0 * atr_value);
+                // 限制止损价格精度，避免币安精度错误
+                let stop_price = (stop_price * 1000000.0).round() / 1000000.0; // 限制到6位小数
+                
                 self.current_signal = 1;  // 设置为多头状态
                 self.last_price = close_price;
+                
                 return Some(TradingSignal::new_market_signal(
                     1,
                     TURBO_USDT_SYMBOL.to_string(),
@@ -102,8 +108,8 @@ impl BollingerStrategy {
                     10000.0,
                     Exchange::Binance,
                     get_timestamp_ms() as u32,
-                    None,
-                    Some(stop_price),
+                    None,  // 止盈价格
+                    Some(stop_price),  // 止损价格
                     close_price,
                 ));
             }
@@ -226,6 +232,262 @@ mod tests {
                 );
             }
         }
+    }
+
+    #[test]
+    fn test_bollinger_close_long_position() {
+        let mut strategy = BollingerStrategy::new(20, 2.0).unwrap();
+        
+        // 1. 先初始化策略
+        for i in 0..20 {
+            let price = 100.0 + (i as f64 * 0.1);
+            let kline = KlineInfo {
+                close_price: price,
+                high_price: price + 0.05,
+                low_price: price - 0.05,
+                open_price: price - 0.02,
+                start_time: 0,
+                close_time: 0,
+                symbol: "TURBOUSDT".to_string(),
+                interval: "1m".to_string(),
+                first_trade_id: 0,
+                last_trade_id: 0,
+                base_volume: 0.0,
+                trade_count: 0,
+                is_closed: true,
+                quote_volume: 0.0,
+                taker_buy_base_volume: 0.0,
+                taker_buy_quote_volume: 0.0,
+                ignore: "".to_string(),
+            };
+            strategy.on_kline_update(&kline);
+        }
+        
+        // 2. 模拟做多信号（触及下轨）
+        let long_kline = KlineInfo {
+            close_price: 95.0,  // 触及下轨
+            high_price: 95.5,
+            low_price: 94.5,
+            open_price: 95.2,
+            start_time: 0,
+            close_time: 0,
+            symbol: "TURBOUSDT".to_string(),
+            interval: "1m".to_string(),
+            first_trade_id: 0,
+            last_trade_id: 0,
+            base_volume: 0.0,
+            trade_count: 0,
+            is_closed: true,
+            quote_volume: 0.0,
+            taker_buy_base_volume: 0.0,
+            taker_buy_quote_volume: 0.0,
+            ignore: "".to_string(),
+        };
+        
+        // 应该产生做多信号
+        if let Some(signal) = strategy.on_kline_update(&long_kline) {
+            println!("做多信号: {:?}", signal.side);
+            assert_eq!(signal.side, Side::Buy);
+            assert_eq!(strategy.current_signal, 1); // 多头状态
+        } else {
+            panic!("应该产生做多信号");
+        }
+        
+        // 3. 模拟价格穿过中线（多头平仓）
+        let close_long_kline = KlineInfo {
+            close_price: 101.0,  // 改为 101.0，确保 >= 100.72
+            high_price: 100.8,
+            low_price: 100.2,
+            open_price: 100.0,
+            start_time: 0,
+            close_time: 0,
+            symbol: "TURBOUSDT".to_string(),
+            interval: "1m".to_string(),
+            first_trade_id: 0,
+            last_trade_id: 0,
+            base_volume: 0.0,
+            trade_count: 0,
+            is_closed: true,
+            quote_volume: 0.0,
+            taker_buy_base_volume: 0.0,
+            taker_buy_quote_volume: 0.0,
+            ignore: "".to_string(),
+        };
+        
+        // 应该产生平仓信号
+        if let Some(signal) = strategy.on_kline_update(&close_long_kline) {
+            println!("平仓信号: {:?}", signal.side);
+            assert_eq!(signal.side, Side::Sell); // 卖出平多
+            assert_eq!(strategy.current_signal, 0); // 无持仓状态
+            
+            // 检查信号格式
+            if let Signal::Market(market_signal) = signal.signal {
+                assert_eq!(market_signal.is_closed, true); // 必须是平仓信号
+                assert_eq!(signal.strategy, StrategyName::BOLLINGER);
+                assert_eq!(signal.symbol, "TURBOUSDT");
+                assert_eq!(signal.quantity, 10000.0);
+            } else {
+                panic!("应该是市场信号");
+            }
+        } else {
+            panic!("应该产生平仓信号");
+        }
+    }
+
+    #[test]
+    fn test_bollinger_close_short_position() {
+        let mut strategy = BollingerStrategy::new(20, 2.0).unwrap();
+        
+        // 1. 先初始化策略
+        for i in 0..20 {
+            let price = 100.0 - (i as f64 * 0.1);
+            let kline = KlineInfo {
+                close_price: price,
+                high_price: price + 0.05,
+                low_price: price - 0.05,
+                open_price: price + 0.02,
+                start_time: 0,
+                close_time: 0,
+                symbol: "TURBOUSDT".to_string(),
+                interval: "1m".to_string(),
+                first_trade_id: 0,
+                last_trade_id: 0,
+                base_volume: 0.0,
+                trade_count: 0,
+                is_closed: true,
+                quote_volume: 0.0,
+                taker_buy_base_volume: 0.0,
+                taker_buy_quote_volume: 0.0,
+                ignore: "".to_string(),
+            };
+            strategy.on_kline_update(&kline);
+        }
+        
+        // 2. 模拟做空信号（触及上轨）
+        let short_kline = KlineInfo {
+            close_price: 105.0,  // 触及上轨
+            high_price: 105.5,
+            low_price: 104.5,
+            open_price: 104.8,
+            start_time: 0,
+            close_time: 0,
+            symbol: "TURBOUSDT".to_string(),
+            interval: "1m".to_string(),
+            first_trade_id: 0,
+            last_trade_id: 0,
+            base_volume: 0.0,
+            trade_count: 0,
+            is_closed: true,
+            quote_volume: 0.0,
+            taker_buy_base_volume: 0.0,
+            taker_buy_quote_volume: 0.0,
+            ignore: "".to_string(),
+        };
+        
+        // 应该产生做空信号
+        if let Some(signal) = strategy.on_kline_update(&short_kline) {
+            println!("做空信号: {:?}", signal.side);
+            assert_eq!(signal.side, Side::Sell);
+            assert_eq!(strategy.current_signal, 2); // 空头状态
+        } else {
+            panic!("应该产生做空信号");
+        }
+        
+        // 3. 模拟价格穿过中线（空头平仓）
+        let close_short_kline = KlineInfo {
+            close_price: 99.5,  // 穿过中线
+            high_price: 99.8,
+            low_price: 99.2,
+            open_price: 100.0,
+            start_time: 0,
+            close_time: 0,
+            symbol: "TURBOUSDT".to_string(),
+            interval: "1m".to_string(),
+            first_trade_id: 0,
+            last_trade_id: 0,
+            base_volume: 0.0,
+            trade_count: 0,
+            is_closed: true,
+            quote_volume: 0.0,
+            taker_buy_base_volume: 0.0,
+            taker_buy_quote_volume: 0.0,
+            ignore: "".to_string(),
+        };
+        
+        // 应该产生平仓信号
+        if let Some(signal) = strategy.on_kline_update(&close_short_kline) {
+            println!("平仓信号: {:?}", signal.side);
+            assert_eq!(signal.side, Side::Buy); // 买入平空
+            assert_eq!(strategy.current_signal, 0); // 无持仓状态
+            
+            // 检查信号格式
+            if let Signal::Market(market_signal) = signal.signal {
+                assert_eq!(market_signal.is_closed, true); // 必须是平仓信号
+                assert_eq!(signal.strategy, StrategyName::BOLLINGER);
+                assert_eq!(signal.symbol, "TURBOUSDT");
+                assert_eq!(signal.quantity, 10000.0);
+            } else {
+                panic!("应该是市场信号");
+            }
+        } else {
+            panic!("应该产生平仓信号");
+        }
+    }
+
+    #[test]
+    fn test_bollinger_no_signal_when_no_position() {
+        let mut strategy = BollingerStrategy::new(20, 2.0).unwrap();
+        
+        // 初始化策略
+        for i in 0..20 {
+            let price = 100.0 + (i as f64 * 0.1);
+            let kline = KlineInfo {
+                close_price: price,
+                high_price: price + 0.05,
+                low_price: price - 0.05,
+                open_price: price - 0.02,
+                start_time: 0,
+                close_time: 0,
+                symbol: "TURBOUSDT".to_string(),
+                interval: "1m".to_string(),
+                first_trade_id: 0,
+                last_trade_id: 0,
+                base_volume: 0.0,
+                trade_count: 0,
+                is_closed: true,
+                quote_volume: 0.0,
+                taker_buy_base_volume: 0.0,
+                taker_buy_quote_volume: 0.0,
+                ignore: "".to_string(),
+            };
+            strategy.on_kline_update(&kline);
+        }
+        
+        // 没有持仓时，价格穿过中线不应该产生信号
+        let cross_middle_kline = KlineInfo {
+            close_price: 100.5,  // 穿过中线
+            high_price: 100.8,
+            low_price: 100.2,
+            open_price: 100.0,
+            start_time: 0,
+            close_time: 0,
+            symbol: "TURBOUSDT".to_string(),
+            interval: "1m".to_string(),
+            first_trade_id: 0,
+            last_trade_id: 0,
+            base_volume: 0.0,
+            trade_count: 0,
+            is_closed: true,
+            quote_volume: 0.0,
+            taker_buy_base_volume: 0.0,
+            taker_buy_quote_volume: 0.0,
+            ignore: "".to_string(),
+        };
+        
+        // 应该没有信号
+        let signal = strategy.on_kline_update(&cross_middle_kline);
+        assert!(signal.is_none(), "没有持仓时不应该产生平仓信号");
+        assert_eq!(strategy.current_signal, 0); // 保持无持仓状态
     }
 }
 

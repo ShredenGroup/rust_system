@@ -92,13 +92,17 @@ impl TradingSignal {
             _ => panic!("Unexpected state: generating close signal without position"),
         };
 
+        // 创建平仓信号，确保 is_closed = true
+        let mut market_signal = MarketSignal::new(close_side, None, None);
+        market_signal.is_closed = true;  // 明确设置为平仓信号
+
         Self {
             id,
             symbol,
             strategy,
             quantity,
             side: close_side,
-            signal: Signal::Market(MarketSignal::new(close_side, None, None)),
+            signal: Signal::Market(market_signal),
             latest_price,
             exchange,
             data_timestamp: get_timestamp_ms() as u32,

@@ -292,6 +292,17 @@ impl BinanceFuturesApi {
         
         // 检查是否为平仓操作
         if market_signal.is_closed {
+            // 平仓操作：先取消该交易对的所有开放订单
+            println!("🔄 平仓操作：先取消 {} 的所有开放订单", signal.symbol);
+            let cancel_result = self.cancel_all_open_orders(&signal.symbol, None).await;
+            if cancel_result.is_ok() {
+                println!("✅ 成功取消 {} 的所有开放订单", signal.symbol);
+            } else {
+                // 如果取消订单失败，记录警告但继续执行平仓
+                let error = cancel_result.unwrap_err();
+                println!("⚠️ 取消开放订单失败: {}，继续执行平仓", error);
+            }
+            
             // 平仓操作：使用硬编码数量 10000000，并设置 reduce_only
             let close_order_request = OrderRequest {
                 symbol: signal.symbol.clone(),
@@ -744,6 +755,102 @@ impl BinanceFuturesApi {
 
         self.batch_orders(orders, None).await
     }
+
+    /// 取消指定交易对的所有开放订单
+    /// 
+    /// # Arguments
+    /// * `symbol` - 交易对符号，如 "BTCUSDT"
+    /// * `recv_window` - 接收窗口时间（可选，默认60000ms）
+    /// 
+    /// # Returns
+    /// * `Result<()>` - 操作结果
+    /// 
+    /// # Example
+    /// ```rust
+    /// let result = api.cancel_all_open_orders("BTCUSDT", None).await?;
+    /// println!("所有开放订单已取消");
+    /// ```
+    pub async fn cancel_all_open_orders(
+        &self,
+        symbol: &str,
+        recv_window: Option<u64>,
+    ) -> Result<()> {
+        // 构建请求参数
+        let mut params = HashMap::new();
+        
+        // 必需参数
+        params.insert("symbol".to_string(), symbol.to_string());
+        params.insert("timestamp".to_string(), Self::get_timestamp().to_string());
+        
+        // 可选参数
+        if let Some(window) = recv_window {
+            params.insert("recvWindow".to_string(), window.to_string());
+        } else {
+            params.insert("recvWindow".to_string(), "60000".to_string());
+        }
+
+        // 构建查询字符串
+        let query_string = self.build_query_string(&params);
+
+        // 生成签名
+        let signature = self.generate_signature(&query_string);
+
+        // 构建完整 URL
+        let url = format!(
+            "{}/allOpenOrders?{}&signature={}",
+            self.base_url, query_string, signature
+        );
+
+        println!("🔄 取消所有开放订单请求URL: {}", url);
+        println!("📊 请求参数: symbol={}, recvWindow={}, timestamp={}", 
+            symbol, recv_window.unwrap_or(60000), Self::get_timestamp());
+
+        // 发送DELETE请求
+        let response = self
+            .client
+            .delete(&url)
+            .header("X-MBX-APIKEY", &self.api_key)
+            .send()
+            .await?;
+
+        // 先获取状态码，因为 text() 会移动 response
+        let status = response.status();
+
+        // 检查响应状态
+        if !status.is_success() {
+            let error_text = response.text().await?;
+            println!("❌ 取消所有开放订单失败: HTTP状态: {}, 错误: {}", 
+                status, error_text);
+            return Err(anyhow::anyhow!("取消所有开放订单失败: HTTP状态: {}, 错误: {}", 
+                status, error_text));
+        }
+
+        // 获取响应文本
+        let response_text = response.text().await?;
+        println!("📡 取消所有开放订单响应: {}", response_text);
+
+        // 检查响应内容
+        if response_text.contains("code") && response_text.contains("msg") {
+            // 尝试解析JSON响应
+            let json_result = serde_json::from_str::<serde_json::Value>(&response_text);
+            if json_result.is_ok() {
+                let json_response = json_result.unwrap();
+                if let Some(code) = json_response.get("code") {
+                    if code.as_u64() == Some(200) {
+                        println!("✅ 成功取消所有开放订单");
+                        return Ok(());
+                    } else {
+                        let msg = json_response.get("msg").and_then(|m| m.as_str()).unwrap_or("未知错误");
+                        return Err(anyhow::anyhow!("取消所有开放订单失败: 错误码 {}, 消息: {}", code, msg));
+                    }
+                }
+            }
+        }
+
+        // 如果无法解析JSON，但HTTP状态是成功的，我们认为操作成功
+        println!("✅ 所有开放订单已取消（HTTP状态: {}）", status);
+        Ok(())
+    }
 }
 
 #[cfg(test)]
@@ -981,6 +1088,39 @@ mod tests {
             let error = result.unwrap_err();
             println!("❌ 平仓信号转订单失败: {}", error);
             panic!("测试失败：{}", error);
+        }
+    }
+
+    #[tokio::test]
+    async fn test_cancel_all_open_orders() {
+        // 加载用户配置
+        let user_config = load_binance_user_config().expect("Failed to load user config");
+        
+        let api = BinanceFuturesApi::new(user_config.api_key, user_config.secret_key);
+        
+        println!("🧪 开始测试取消所有开放订单功能...");
+        println!("📊 测试参数:");
+        println!("   交易对: TURBOUSDT");
+        println!("   接收窗口: 60000ms (默认)");
+        
+        // 执行取消所有开放订单操作
+        let result = api.cancel_all_open_orders("TURBOUSDT", None).await;
+        
+        if result.is_ok() {
+            println!("✅ 取消所有开放订单成功！");
+            println!("🎉 测试通过！成功取消TURBOUSDT的所有开放订单");
+        } else {
+            let error = result.unwrap_err();
+            println!("❌ 取消所有开放订单失败: {}", error);
+            
+            // 如果失败是因为没有开放订单，这也是正常的
+            if error.to_string().contains("no open orders") || 
+               error.to_string().contains("no orders") {
+                println!("ℹ️  没有开放订单需要取消，这也是正常情况");
+                println!("🎉 测试通过！没有开放订单需要取消");
+            } else {
+                panic!("测试失败：{}", error);
+            }
         }
     }
 }

@@ -1,11 +1,11 @@
 #!/bin/bash
 
-# 布林带策略测试程序停止脚本
+# 布林带策略程序停止脚本
 
-# 设置工作目录
-cd "$(dirname "$0")"
+# 设置工作目录为项目根目录（scripts的上级目录）
+cd "$(dirname "$0")/.."
 
-PID_FILE="logs/bollinger_test.pid"
+PID_FILE="logs/bollinger_strategy.pid"
 
 if [ ! -f "$PID_FILE" ]; then
     echo "⚠️  PID文件不存在，程序可能没有运行"
@@ -20,7 +20,7 @@ if ! ps -p $PID > /dev/null 2>&1; then
     exit 0
 fi
 
-echo "🛑 正在停止布林带策略测试程序 (PID: $PID)..."
+echo "🛑 正在停止布林带策略程序 (PID: $PID)..."
 
 # 尝试优雅停止
 kill $PID

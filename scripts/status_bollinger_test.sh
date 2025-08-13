@@ -1,13 +1,13 @@
 #!/bin/bash
 
-# 布林带策略测试程序状态查看脚本
+# 布林带策略程序状态查看脚本
 
-# 设置工作目录
-cd "$(dirname "$0")"
+# 设置工作目录为项目根目录（scripts的上级目录）
+cd "$(dirname "$0")/.."
 
-PID_FILE="logs/bollinger_test.pid"
+PID_FILE="logs/bollinger_strategy.pid"
 
-echo "📊 布林带策略测试程序状态检查"
+echo "📊 布林带策略程序状态检查"
 echo "=" * 50
 
 if [ ! -f "$PID_FILE" ]; then
@@ -29,7 +29,7 @@ if ps -p $PID > /dev/null 2>&1; then
     echo "📋 最新日志 (最后10行):"
     echo "-" * 30
     if [ -d "logs" ]; then
-        LATEST_LOG=$(ls -t logs/bollinger_test_*.log 2>/dev/null | head -1)
+        LATEST_LOG=$(ls -t logs/bollinger_strategy_*.log 2>/dev/null | head -1)
         if [ -n "$LATEST_LOG" ]; then
             tail -10 "$LATEST_LOG"
         else
@@ -45,7 +45,7 @@ fi
 echo ""
 echo "📁 日志文件列表:"
 if [ -d "logs" ]; then
-    ls -la logs/bollinger_test_*.log 2>/dev/null | head -5
+    ls -la logs/bollinger_strategy_*.log 2>/dev/null | head -5
 else
     echo "logs目录不存在"
 fi 
