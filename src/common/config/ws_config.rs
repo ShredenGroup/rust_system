@@ -116,6 +116,12 @@ pub struct DiffDepthConfigRaw {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct BookTickerConfigRaw {
+    pub symbol: Vec<String>,
+    pub base: Option<WebSocketBaseConfig>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct WebSocketConfigsRaw {
     pub base: WebSocketBaseConfig,
     #[serde(default)]
@@ -126,6 +132,8 @@ pub struct WebSocketConfigsRaw {
     pub partial_depth: Vec<PartialDepthConfigRaw>,
     #[serde(default)]
     pub diff_depth: Vec<DiffDepthConfigRaw>,
+    #[serde(default)]
+    pub book_ticker: Vec<BookTickerConfigRaw>,
 }
 
 /// 标记价格配置
@@ -243,6 +251,31 @@ impl DiffDepthConfig {
     }
 }
 
+/// Book Ticker 配置
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct BookTickerConfig {
+    pub base: WebSocketBaseConfig,
+    pub symbol: Vec<String>,  // 支持多个交易对
+}
+
+impl BookTickerConfig {
+    /// 创建 Book Ticker 配置
+    pub fn new(symbol: &str, base: WebSocketBaseConfig) -> Self {
+        BookTickerConfig {
+            base: base.with_tag("book_ticker"),
+            symbol: vec![symbol.to_string()],
+        }
+    }
+    
+    /// 创建多交易对 Book Ticker 配置
+    pub fn new_multi(symbols: Vec<String>, base: WebSocketBaseConfig) -> Self {
+        BookTickerConfig {
+            base: base.with_tag("book_ticker"),
+            symbol: symbols,
+        }
+    }
+}
+
 /// WebSocket 配置集合
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct WebSocketConfigs {
@@ -258,6 +291,9 @@ pub struct WebSocketConfigs {
     /// 订单簿深度差异配置列表
     pub diff_depth: Vec<DiffDepthConfig>,
 
+    /// Book Ticker 配置列表
+    pub book_ticker: Vec<BookTickerConfig>,
+
     pub base: WebSocketBaseConfig,
 }
 
@@ -268,6 +304,7 @@ impl Default for WebSocketConfigs {
             kline: vec![],
             partial_depth: vec![],
             diff_depth: vec![],
+            book_ticker: vec![],
             base: WebSocketBaseConfig {
                 auto_reconnect: true,
                 max_retries: 5,
@@ -313,11 +350,16 @@ impl ConfigLoader {
             symbol: item.symbol,
             level: item.level,
         }).collect();
+        let book_ticker = raw.book_ticker.into_iter().map(|item| BookTickerConfig {
+            base: base.merge(&item.base),
+            symbol: item.symbol,
+        }).collect();
         Ok(WebSocketConfigs {
             mark_price,
             kline,
             partial_depth,
             diff_depth,
+            book_ticker,
             base,
         })
     }
@@ -357,6 +399,10 @@ impl ConfigLoader {
             diff_depth: vec![
                 DiffDepthConfig::new("btcusdt", 5, default_base.clone()),
                 DiffDepthConfig::new("btcusdt", 10, default_base.clone()),
+            ],
+            book_ticker: vec![
+                BookTickerConfig::new("btcusdt", default_base.clone()),
+                BookTickerConfig::new("ethusdt", default_base.clone()),
             ],
             base: default_base,
         }

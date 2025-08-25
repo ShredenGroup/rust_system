@@ -259,6 +259,64 @@ impl IsClosed for KlineInfo {
 //     }
 // }
 
+/// Book Ticker 数据 - 实时推送指定交易对的最佳买卖价格和数量更新
+#[serde_as]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct BookTickerData {
+    #[serde(rename = "e")]
+    pub event_type: String, // "bookTicker"
+
+    #[serde(rename = "u")]
+    pub order_book_update_id: u64, // order book updateId
+
+    #[serde(rename = "E")]
+    pub event_time: i64, // event time
+
+    #[serde(rename = "T")]
+    pub transaction_time: i64, // transaction time
+
+    #[serde(rename = "s")]
+    pub symbol: String, // symbol
+
+    #[serde(rename = "b")]
+    #[serde_as(as = "DisplayFromStr")]
+    pub best_bid_price: f64, // best bid price (auto-converted from string)
+
+    #[serde(rename = "B")]
+    #[serde_as(as = "DisplayFromStr")]
+    pub best_bid_qty: f64, // best bid qty (auto-converted from string)
+
+    #[serde(rename = "a")]
+    #[serde_as(as = "DisplayFromStr")]
+    pub best_ask_price: f64, // best ask price (auto-converted from string)
+
+    #[serde(rename = "A")]
+    #[serde_as(as = "DisplayFromStr")]
+    pub best_ask_qty: f64, // best ask qty (auto-converted from string)
+}
+
+impl BookTickerData {
+    /// 获取买卖价差
+    pub fn spread(&self) -> f64 {
+        self.best_ask_price - self.best_bid_price
+    }
+
+    /// 获取中间价
+    pub fn mid_price(&self) -> f64 {
+        (self.best_bid_price + self.best_ask_price) / 2.0
+    }
+
+    /// 获取价差百分比
+    pub fn spread_percentage(&self) -> f64 {
+        (self.spread() / self.mid_price()) * 100.0
+    }
+
+    /// 检查是否有有效的买卖价格
+    pub fn has_valid_prices(&self) -> bool {
+        self.best_bid_price > 0.0 && self.best_ask_price > 0.0
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -425,6 +483,39 @@ mod tests {
         assert_eq!(data.best_ask(), Some(2521.13));
         assert_eq!(data.spread(), Some(2321.13));
         assert_eq!(data.mid_price(), Some(1360.565));
+    }
+
+    #[test]
+    fn test_book_ticker_data_parsing() {
+        let json_str = r#"{
+            "e": "bookTicker",
+            "u": 400900217,
+            "E": 1568014460893,
+            "T": 1568014460891,
+            "s": "BNBUSDT",
+            "b": "25.35190000",
+            "B": "31.21000000",
+            "a": "25.36520000",
+            "A": "40.66000000"
+        }"#;
+
+        let data: BookTickerData = serde_json::from_str(json_str).unwrap();
+
+        assert_eq!(data.event_type, "bookTicker");
+        assert_eq!(data.order_book_update_id, 400900217);
+        assert_eq!(data.event_time, 1568014460893);
+        assert_eq!(data.transaction_time, 1568014460891);
+        assert_eq!(data.symbol, "BNBUSDT");
+        assert_eq!(data.best_bid_price, 25.35190000);
+        assert_eq!(data.best_bid_qty, 31.21000000);
+        assert_eq!(data.best_ask_price, 25.36520000);
+        assert_eq!(data.best_ask_qty, 40.66000000);
+
+        // 测试便利方法
+        assert_eq!(data.spread(), 0.0133);
+        assert_eq!(data.mid_price(), 25.35855);
+        assert!((data.spread_percentage() - 0.0524).abs() < 0.0001);
+        assert!(data.has_valid_prices());
     }
 }
 

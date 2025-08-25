@@ -1,8 +1,8 @@
 use crate::common::config::ws_config::{
-    MarkPriceConfig, KlineConfig, PartialDepthConfig, DiffDepthConfig, ConfigLoader
+    MarkPriceConfig, KlineConfig, PartialDepthConfig, DiffDepthConfig, ConfigLoader, BookTickerConfig
 };
 use super::ws::BinanceWebSocket;
-use crate::dto::binance::websocket::{MarkPriceData, DepthUpdateData, KlineData};
+use crate::dto::binance::websocket::{MarkPriceData, DepthUpdateData, KlineData, BookTickerData};
 use anyhow::Result;
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -18,6 +18,7 @@ pub enum WebSocketDataType {
     Kline,          // K线数据
     PartialDepth,   // 部分订单簿深度
     DiffDepth,      // 订单簿深度差异
+    BookTicker,     // Book Ticker数据
 }
 
 /// WebSocket 消息类型 - 使用 Arc 优化内存使用
@@ -27,6 +28,7 @@ pub enum WebSocketMessage {
     Kline(Arc<KlineData>),
     PartialDepth(Arc<DepthUpdateData>),
     DiffDepth(Arc<DepthUpdateData>),
+    BookTicker(Arc<BookTickerData>),
 }
 
 /// WebSocket 连接信息
@@ -361,6 +363,66 @@ impl WebSocketManager {
         Ok(())
     }
 
+    /// 启动 Book Ticker WebSocket 连接
+    pub async fn start_book_ticker(&self, config: BookTickerConfig) -> Result<()> {
+        let connection_id = format!("book_ticker_{}", config.symbol.join("_"));
+        let message_tx = self.message_tx.clone();
+        
+        let ws_client = self.ws_client.clone();
+        let connections = self.connections.clone();
+        let connection_id_clone = connection_id.clone();
+        
+        // 克隆配置数据以避免生命周期问题
+        let symbols = config.symbol.clone();
+        let tags = config.base.tags.clone();
+        
+        // 创建连接信息
+        let connection_info = ConnectionInfo {
+            connection_id: connection_id.clone(),
+            symbol: symbols.join(","),  // 转换为字符串用于显示
+            data_type: WebSocketDataType::BookTicker,
+            status: ConnectionStatus::Connecting,
+            created_at: std::time::Instant::now(),
+            last_message_at: None,
+            tags: tags.clone(),
+        };
+        
+        let handle = tokio::spawn(async move {
+            // 为每个交易对创建连接
+            for symbol in &symbols {
+                // 创建专门用于 BookTickerData 的通道
+                let (book_ticker_tx, mut book_ticker_rx) = mpsc::unbounded_channel::<BookTickerData>();
+                
+                // 启动消息转发任务
+                let message_tx_clone = message_tx.clone();
+                tokio::spawn(async move {
+                    while let Some(data) = book_ticker_rx.recv().await {
+                        if let Err(e) = message_tx_clone.send(WebSocketMessage::BookTicker(Arc::new(data))) {
+                            eprintln!("Failed to forward book ticker message: {}", e);
+                            break;
+                        }
+                    }
+                });
+                
+                let result = ws_client.subscribe_book_ticker(symbol, book_ticker_tx).await;
+                
+                if let Err(e) = result {
+                    eprintln!("Book Ticker WebSocket connection failed for {}: {}", symbol, e);
+                }
+            }
+            
+            // 从连接映射中移除
+            let mut conns = connections.lock().await;
+            conns.remove(&connection_id_clone);
+        });
+        
+        // 保存连接句柄和信息
+        let mut conns = self.connections.lock().await;
+        conns.insert(connection_id, (handle, connection_info));
+        
+        Ok(())
+    }
+
     /// 从配置文件启动所有连接
     pub async fn start_from_config(&self, config_path: &str) -> Result<()> {
         let configs = ConfigLoader::load_from_file(config_path)
@@ -384,6 +446,11 @@ impl WebSocketManager {
         // 启动深度差异连接
         for config in configs.diff_depth {
             self.start_diff_depth(config).await?;
+        }
+        
+        // 启动 Book Ticker 连接
+        for config in configs.book_ticker {
+            self.start_book_ticker(config).await?;
         }
         
         Ok(())
@@ -497,6 +564,9 @@ pub async fn example_usage() -> Result<()> {
                 },
                 WebSocketMessage::DiffDepth(depth) => {
                     println!("Received diff depth: {:?}", depth);
+                },
+                WebSocketMessage::BookTicker(book_ticker) => {
+                    println!("Received book ticker: {:?}", book_ticker);
                 },
             }
         }

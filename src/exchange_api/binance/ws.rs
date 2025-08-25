@@ -1,5 +1,5 @@
 use crate::common::consts::BINANCE_WS;
-use crate::dto::binance::websocket::{MarkPriceData, DepthUpdateData, KlineData};
+use crate::dto::binance::websocket::{MarkPriceData, DepthUpdateData, KlineData, BookTickerData};
 use anyhow::Result;
 use futures::StreamExt;
 use serde_json;
@@ -381,6 +381,105 @@ impl BinanceWebSocket {
 
         Ok(())
     }
+
+    /// 订阅 Book Ticker 数据
+    ///
+    /// # Arguments
+    /// * `symbol` - 交易对符号，如 "btcusdt"
+    /// * `tx` - 消息发送通道
+    pub async fn subscribe_book_ticker(
+        &self,
+        symbol: &str,
+        tx: mpsc::UnboundedSender<BookTickerData>,
+    ) -> Result<()> {
+        let stream_name = format!("{}@bookTicker", symbol);
+        let ws_url = format!("{}/{}", self.base_url, stream_name);
+
+        println!("Connecting to Book Ticker WebSocket: {}", ws_url);
+
+        let url = Url::parse(&ws_url)?;
+        let (ws_stream, _) = connect_async(url).await?;
+
+        println!("✅ Book Ticker WebSocket connected successfully");
+
+        let (_, mut read) = ws_stream.split();
+
+        while let Some(msg) = read.next().await {
+            match msg? {
+                Message::Text(text) => {
+                    if let Ok(data) = serde_json::from_str::<BookTickerData>(&text) {
+                        if let Err(e) = tx.send(data) {
+                            eprintln!("Failed to send book ticker message: {}", e);
+                            break;
+                        }
+                    }
+                }
+                Message::Close(_) => {
+                    println!("Book Ticker WebSocket connection closed");
+                    break;
+                }
+                Message::Ping(_) => {
+                    println!("Received ping from book ticker stream");
+                }
+                Message::Pong(_) => {
+                    println!("Received pong from book ticker stream");
+                }
+                _ => {}
+            }
+        }
+
+        Ok(())
+    }
+
+    /// 订阅多个交易对的 Book Ticker 数据
+    pub async fn subscribe_multiple_book_tickers(
+        &self,
+        symbols: &[String],
+        tx: mpsc::UnboundedSender<BookTickerData>,
+    ) -> Result<()> {
+        let stream_names: Vec<String> = symbols
+            .iter()
+            .map(|symbol| format!("{}@bookTicker", symbol))
+            .collect();
+
+        let combined_stream = stream_names.join("/");
+        let ws_url = format!("{}/{}", self.base_url, combined_stream);
+
+        println!("Connecting to multiple book ticker streams: {}", ws_url);
+
+        let url = Url::parse(&ws_url)?;
+        let (ws_stream, _) = connect_async(url).await?;
+
+        println!("✅ Multiple book ticker streams connected successfully");
+
+        let (_, mut read) = ws_stream.split();
+
+        while let Some(msg) = read.next().await {
+            match msg? {
+                Message::Text(text) => {
+                    if let Ok(data) = serde_json::from_str::<BookTickerData>(&text) {
+                        if let Err(e) = tx.send(data) {
+                            eprintln!("Failed to send book ticker message: {}", e);
+                            break;
+                        }
+                    }
+                }
+                Message::Close(_) => {
+                    println!("Multiple book ticker streams connection closed");
+                    break;
+                }
+                Message::Ping(_) => {
+                    println!("Received ping from multiple book ticker streams");
+                }
+                Message::Pong(_) => {
+                    println!("Received pong from multiple book ticker streams");
+                }
+                _ => {}
+            }
+        }
+
+        Ok(())
+    }
 }
 
 // 使用示例和测试
@@ -548,6 +647,63 @@ mod tests {
 
         while let Some(data) = rx.recv().await {
             println!("收到多K线数据: {} - {}", data.symbol, data.kline.interval);
+            message_count += 1;
+
+            if message_count >= max_messages {
+                break;
+            }
+        }
+
+        // 等待 WebSocket 任务完成
+        let _ = ws_handle.await;
+    }
+
+    #[tokio::test]
+    async fn test_book_ticker_websocket_connection() {
+        let ws = BinanceWebSocket::new();
+        let (tx, mut rx) = mpsc::unbounded_channel();
+
+        // 启动 Book Ticker WebSocket 连接
+        let symbol = "btcusdt";
+
+        let ws_handle = tokio::spawn(async move { ws.subscribe_book_ticker(symbol, tx).await });
+
+        // 接收几条消息
+        let mut message_count = 0;
+        let max_messages = 3;
+
+        while let Some(data) = rx.recv().await {
+            println!("收到Book Ticker数据: {} - 买价: {:.2}, 卖价: {:.2}", 
+                data.symbol, data.best_bid_price, data.best_ask_price);
+            message_count += 1;
+
+            if message_count >= max_messages {
+                break;
+            }
+        }
+
+        // 等待 WebSocket 任务完成
+        let _ = ws_handle.await;
+    }
+
+    #[tokio::test]
+    async fn test_multiple_book_tickers_websocket_connection() {
+        let ws = BinanceWebSocket::new();
+        let (tx, mut rx) = mpsc::unbounded_channel();
+
+        // 启动多个 Book Ticker WebSocket 连接
+        let symbols = vec!["btcusdt".to_string(), "ethusdt".to_string()];
+
+        let ws_handle =
+            tokio::spawn(async move { ws.subscribe_multiple_book_tickers(&symbols, tx).await });
+
+        // 接收几条消息
+        let mut message_count = 0;
+        let max_messages = 5;
+
+        while let Some(data) = rx.recv().await {
+            println!("收到多Book Ticker数据: {} - 价差: {:.4}", 
+                data.symbol, data.spread());
             message_count += 1;
 
             if message_count >= max_messages {
