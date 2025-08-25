@@ -1,4 +1,5 @@
-use ta::indicators::{AverageTrueRange, new_bollinger::NewBollinger};
+use ta::indicators::AverageTrueRange;
+use ta::indicators::NewBollinger;
 use ta::{Next, Close, High, Low, Open, Update};
 use crate::common::enums::{Exchange, StrategyName};
 use crate::common::signal::{TradingSignal, Side, Signal, MarketSignal};
@@ -60,7 +61,7 @@ impl BollingerStrategy {
                     TURBO_USDT_SYMBOL.to_string(),
                     position_to_close,  // 使用保存的位置
                     StrategyName::BOLLINGER,
-                    10000.0,
+                    1000.0,
                     Exchange::Binance,
                     close_price,
                 );

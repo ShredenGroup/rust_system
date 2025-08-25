@@ -69,6 +69,11 @@ ta = {path="../ta-rs"}
 serde_with = "3.14.0"
 tracing-appender = "0.2.3"
 
+prost = "0.12"
+
+[build-dependencies]
+tonic-build = "0.10"
+
 [[bin]]
 name = "rust_system"
 path = "src/main.rs"
@@ -78,12 +83,8 @@ name = "macd_signal_test"
 path = "src/bin/macd_signal_test.rs"
 
 [[bin]]
-name = "strategy_manager_test"
-path = "src/bin/strategy_manager_test.rs"
-
-[[bin]]
-name = "macd_test"
-path = "src/bin/macd_test.rs"
+name = "mexc_test"
+path = "src/bin/mexc_test.rs"
 
 [[bin]]
 name = "api_manager_test"

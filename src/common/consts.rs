@@ -1,5 +1,6 @@
 pub const BINANCE_BASE_URL: &str = "https://api.binance.com/api";
 pub const BINANCE_FUTURES_URL: &str = "https://fapi.binance.com/fapi/v1";
+pub const MEXC_SPOT_URL: &str = "https://api.exc.com";
 pub const BINANCE_WS: &str = "wss://fstream.binance.com/ws";
 pub const BTC_USDT_SYMBOL: &str = "BTCUSDT";
 pub const ETH_USDT_SYMBOL: &str = "ETHUSDT";

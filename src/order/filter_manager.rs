@@ -183,7 +183,7 @@ mod tests {
             "TURBOUSDT".to_string(),     // symbol
             Side::Buy,                   // side: 买入
             StrategyName::MACD,          // strategy
-            10000.0,                     // quantity: 10000
+            1000.0,                     // quantity: 10000
             Exchange::Binance,           // exchange
             0,                           // data_timestamp
             None,                        // profit_price: 无止盈

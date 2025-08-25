@@ -1,9 +1,8 @@
-#[derive(Debug, Clone, PartialEq)]
-#[repr(u8)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Exchange {
-    Binance = 0,
-    Okex = 1,
-    MEXC = 2,
+    Binance,
+    Mexc,
+    Okex,
 }
 
 #[derive(Debug, Clone, PartialEq,Copy,Hash,Eq)]
