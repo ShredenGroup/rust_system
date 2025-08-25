@@ -10,6 +10,8 @@ use url::Url;
 // 导入 MEXC 的 protobuf 结构体和 Message trait
 use crate::dto::mexc::websocket::PushDataV3ApiWrapper;
 use prost::Message as ProstMessage; // 重命名
+use crate::dto::mexc::websocket::PublicAggreBookTickerV3Api;
+use crate::common::ts::BookTickerData;
 
 #[derive(Debug, Clone)]
 pub struct MexcWebSocket {
@@ -272,6 +274,211 @@ impl MexcWebSocket {
         Ok(())
     }
 
+    /// 订阅单个 Book Ticker 数据
+    pub async fn subscribe_book_ticker(
+        &mut self,
+        symbol: &str,
+        interval: &str,
+    ) -> Result<mpsc::Receiver<PublicAggreBookTickerV3Api>, Box<dyn std::error::Error>> {
+        let (tx, rx) = mpsc::channel::<PublicAggreBookTickerV3Api>(1000);
+        let ws_url = self.base_url.clone();
+        println!("Connecting to MEXC Book Ticker WebSocket: {}", ws_url);
+
+        let url: Url = Url::parse(&ws_url)?;
+        let (ws_stream, _) = connect_async(url).await?;
+
+        println!("✅ MEXC Book Ticker WebSocket connected successfully");
+
+        let (mut write, mut read) = ws_stream.split();
+
+        // 发送订阅请求
+        let subscribe_msg = serde_json::json!({
+            "method": "SUBSCRIPTION",
+            "params": [
+                format!("spot@public.aggre.bookTicker.v3.api.pb@{}@{}", interval, symbol.to_uppercase())
+            ]
+        });
+
+        let subscribe_text = subscribe_msg.to_string();
+        println!("📤 发送 Book Ticker 订阅请求: {}", subscribe_text);
+        
+        let msg = WsMessage::Text(subscribe_text);
+        write.send(msg).await?;
+
+        // 处理接收到的消息
+        while let Some(msg) = read.next().await {
+            match msg? {
+                WsMessage::Text(text) => {
+                    println!("📥 收到 Book Ticker 文本消息: {}", text);
+                    
+                    // 对于文本消息，我们只记录日志，不发送到通道
+                    // 因为通道现在只接受 Book Ticker 结构体
+                    println!("📝 收到 Book Ticker 文本消息，跳过发送到通道");
+                }
+                WsMessage::Binary(data) => {
+                    println!("📊 收到 Book Ticker 二进制数据(protobuf)，长度: {}", data.len());
+                    
+                    // 尝试解析 MEXC 官方 protobuf 结构
+                    match crate::dto::mexc::websocket::PushDataV3ApiWrapper::decode(&*data) {
+                        Ok(wrapper) => {
+                            if let Some(book_ticker) = wrapper.extract_book_ticker_data() {
+                                println!("✅ Book Ticker 解析成功: {} | 买价: {} | 买量: {} | 卖价: {} | 卖量: {} | 价差: {:.8} | 中间价: {:.8}", 
+                                    wrapper.channel, book_ticker.bid_price, book_ticker.bid_quantity,
+                                    book_ticker.ask_price, book_ticker.ask_quantity,
+                                    book_ticker.spread(), book_ticker.mid_price());
+                                
+                                // 直接发送 Book Ticker 结构体到通道
+                                if let Err(e) = tx.send(book_ticker.clone()).await {
+                                    eprintln!("Failed to send book ticker: {}", e);
+                                    break;
+                                }
+                            } else {
+                                println!("⚠️  Book Ticker 数据为空");
+                                println!("🔍 调试信息 - Channel: {}, Symbol: {:?}, SendTime: {:?}", 
+                                    wrapper.channel, wrapper.symbol, wrapper.send_time);
+                                
+                                // 对于空数据，我们只记录日志，不发送到通道
+                                // 因为通道现在只接受 Book Ticker 结构体
+                                println!("📝 Book Ticker 数据为空，跳过发送到通道");
+                            }
+                        }
+                        Err(e) => {
+                            println!("❌ Book Ticker protobuf 解析失败: {}", e);
+                            println!("🔍 原始数据长度: {} 字节", data.len());
+                            
+                            // 对于解析失败的数据，我们只记录日志，不发送到通道
+                            // 因为通道现在只接受 Book Ticker 结构体
+                            println!("📝 Protobuf 解析失败，跳过发送到通道");
+                        }
+                    }
+                }
+                WsMessage::Close(_) => {
+                    println!("❌ MEXC Book Ticker WebSocket connection closed");
+                    break;
+                }
+                WsMessage::Ping(data) => {
+                    println!("🏓 收到 Ping，发送 Pong 响应");
+                    let pong_msg = WsMessage::Pong(data);
+                    if let Err(e) = write.send(pong_msg).await {
+                        eprintln!("Failed to send pong: {}", e);
+                        break;
+                    }
+                }
+                WsMessage::Pong(_) => {
+                    println!("🏓 收到 Pong");
+                }
+                _ => {}
+            }
+        }
+
+        Ok(rx)
+    }
+
+    /// 订阅多个交易对的 Book Ticker 数据
+    pub async fn subscribe_multiple_book_tickers(
+        &mut self,
+        symbols: Vec<String>,
+        interval: &str,
+    ) -> Result<mpsc::Receiver<PublicAggreBookTickerV3Api>, Box<dyn std::error::Error>> {
+        let (tx, rx) = mpsc::channel::<PublicAggreBookTickerV3Api>(1000);
+        let ws_url = self.base_url.clone();
+        println!("Connecting to MEXC Multiple Book Ticker WebSocket: {}", ws_url);
+
+        let url: Url = Url::parse(&ws_url)?;
+        let (ws_stream, _) = connect_async(url).await?;
+
+        println!("✅ MEXC Multiple Book Ticker WebSocket connected successfully");
+
+        let (mut write, mut read) = ws_stream.split();
+
+        // 发送多个订阅请求
+        for symbol in &symbols {
+            let subscribe_msg = serde_json::json!({
+                "method": "SUBSCRIPTION",
+                "params": [
+                    format!("spot@public.aggre.bookTicker.v3.api.pb@{}@{}", interval, symbol.to_uppercase())
+                ]
+            });
+
+            let subscribe_text = subscribe_msg.to_string();
+            println!("📤 发送 Book Ticker 订阅请求: {} -> {}", symbol, subscribe_text);
+            
+            let msg = WsMessage::Text(subscribe_text);
+            write.send(msg).await?;
+            
+            // 短暂延迟，避免发送过快
+            tokio::time::sleep(Duration::from_millis(100)).await;
+        }
+
+        // 处理接收到的消息
+        while let Some(msg) = read.next().await {
+            match msg? {
+                WsMessage::Text(text) => {
+                    println!("📥 收到多 Book Ticker 文本消息: {}", text);
+                    
+                    // 对于文本消息，我们只记录日志，不发送到通道
+                    // 因为通道现在只接受 Book Ticker 结构体
+                    println!("📝 收到多 Book Ticker 文本消息，跳过发送到通道");
+                }
+                WsMessage::Binary(data) => {
+                    println!("📊 收到多 Book Ticker 二进制数据(protobuf)，长度: {}", data.len());
+                    
+                    // 尝试解析 MEXC 官方 protobuf 结构
+                    match crate::dto::mexc::websocket::PushDataV3ApiWrapper::decode(&*data) {
+                        Ok(wrapper) => {
+                            if let Some(book_ticker) = wrapper.extract_book_ticker_data() {
+                                println!("✅ 多 Book Ticker 解析成功: {} | 买价: {} | 买量: {} | 卖价: {} | 卖量: {} | 价差: {:.8} | 中间价: {:.8}", 
+                                    wrapper.channel, book_ticker.bid_price, book_ticker.bid_quantity,
+                                    book_ticker.ask_price, book_ticker.ask_quantity,
+                                    book_ticker.spread(), book_ticker.mid_price());
+                                
+                                // 直接发送 Book Ticker 结构体到通道
+                                if let Err(e) = tx.send(book_ticker.clone()).await {
+                                    eprintln!("Failed to send book ticker: {}", e);
+                                    break;
+                                }
+                            } else {
+                                println!("⚠️  多 Book Ticker 数据为空");
+                                println!("🔍 调试信息 - Channel: {}, Symbol: {:?}, SendTime: {:?}", 
+                                    wrapper.channel, wrapper.symbol, wrapper.send_time);
+                                
+                                // 对于空数据，我们只记录日志，不发送到通道
+                                // 因为通道现在只接受 Book Ticker 结构体
+                                println!("📝 多 Book Ticker 数据为空，跳过发送到通道");
+                            }
+                        }
+                        Err(e) => {
+                            println!("❌ 多 Book Ticker protobuf 解析失败: {}", e);
+                            println!("🔍 原始数据长度: {} 字节", data.len());
+                            
+                            // 对于解析失败的数据，我们只记录日志，不发送到通道
+                            // 因为通道现在只接受 Book Ticker 结构体
+                            println!("📝 多 Book Ticker Protobuf 解析失败，跳过发送到通道");
+                        }
+                    }
+                }
+                WsMessage::Close(_) => {
+                    println!("❌ MEXC Multiple Book Ticker WebSocket connection closed");
+                    break;
+                }
+                WsMessage::Ping(data) => {
+                    println!("🏓 收到 Ping，发送 Pong 响应");
+                    let pong_msg = WsMessage::Pong(data);
+                    if let Err(e) = write.send(pong_msg).await {
+                        eprintln!("Failed to send pong: {}", e);
+                        break;
+                    }
+                }
+                WsMessage::Pong(_) => {
+                    println!("🏓 收到 Pong");
+                }
+                _ => {}
+            }
+        }
+
+        Ok(rx)
+    }
+
     /// 带重连机制的 K线订阅
     pub async fn subscribe_kline_with_reconnect(
         &self,
@@ -445,6 +652,66 @@ mod tests {
 
         while let Some(data) = rx.recv().await {
             println!("Received: {}", data);
+            message_count += 1;
+
+            if message_count >= max_messages {
+                break;
+            }
+        }
+
+        // 等待 WebSocket 任务完成
+        let _ = ws_handle.await;
+    }
+
+    #[tokio::test]
+    async fn test_book_ticker_subscription() {
+        let ws = MexcWebSocket::new();
+        let (tx, mut rx) = mpsc::unbounded_channel();
+
+        // 启动 Book Ticker WebSocket 连接
+        let symbol = "BTCUSDT";
+        let interval = "100ms";
+
+        let ws_handle = tokio::spawn(async move { 
+            ws.subscribe_book_ticker(symbol, interval).await 
+        });
+
+        // 接收几条消息
+        let mut message_count = 0;
+        let max_messages = 5;
+
+        while let Some(data) = rx.recv().await {
+            println!("Received Book Ticker: {}", data);
+            message_count += 1;
+
+            if message_count >= max_messages {
+                break;
+            }
+        }
+
+        // 等待 WebSocket 任务完成
+        let _ = ws_handle.await;
+    }
+
+    #[tokio::test]
+    async fn test_multiple_book_tickers_subscription() {
+        let ws = MexcWebSocket::new();
+        let (tx, mut rx) = mpsc::unbounded_channel();
+
+        // 订阅多个交易对的 Book Ticker
+        let symbols = vec!["BTCUSDT".to_string(), "ETHUSDT".to_string()];
+        let interval = "100ms";
+
+        let ws_handle = tokio::spawn(async move { 
+            ws.subscribe_multiple_book_tickers(symbols, interval).await 
+        });
+
+        // 接收几条消息
+        let mut message_count = 0;
+        let max_messages = 10;
+
+        while let Some(data) = rx.recv().await {
+            println!("Received Multiple Book Ticker: {}", data);
             message_count += 1;
 
             if message_count >= max_messages {

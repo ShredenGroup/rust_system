@@ -4,6 +4,7 @@ use serde::{Deserialize, Serialize};
 use serde_with::{DisplayFromStr, serde_as};
 use ta::{Close, High, Low, Not, Open, Qav, Tbbav, Tbqav, Volume};
 use crate::common::ts::IsClosed;
+use crate::common::ts::BookTickerData as BookTickerDataTrait;
 /// 标记价格数据 - 使用 serde_with 自动转换字符串到数值
 #[serde_as]
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -259,42 +260,74 @@ impl IsClosed for KlineInfo {
 //     }
 // }
 
-/// Book Ticker 数据 - 实时推送指定交易对的最佳买卖价格和数量更新
+/// Binance Book Ticker 数据结构
 #[serde_as]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct BookTickerData {
     #[serde(rename = "e")]
-    pub event_type: String, // "bookTicker"
-
+    pub event_type: String, // 事件类型
+    
     #[serde(rename = "u")]
     pub order_book_update_id: u64, // order book updateId
-
+    
     #[serde(rename = "E")]
     pub event_time: i64, // event time
-
+    
     #[serde(rename = "T")]
     pub transaction_time: i64, // transaction time
-
+    
     #[serde(rename = "s")]
     pub symbol: String, // symbol
-
+    
+    #[serde_as(as = "DisplayFromStr")]
     #[serde(rename = "b")]
-    #[serde_as(as = "DisplayFromStr")]
     pub best_bid_price: f64, // best bid price (auto-converted from string)
-
+    
+    #[serde_as(as = "DisplayFromStr")]
     #[serde(rename = "B")]
-    #[serde_as(as = "DisplayFromStr")]
     pub best_bid_qty: f64, // best bid qty (auto-converted from string)
-
+    
+    #[serde_as(as = "DisplayFromStr")]
     #[serde(rename = "a")]
-    #[serde_as(as = "DisplayFromStr")]
     pub best_ask_price: f64, // best ask price (auto-converted from string)
-
-    #[serde(rename = "A")]
+    
     #[serde_as(as = "DisplayFromStr")]
+    #[serde(rename = "A")]
     pub best_ask_qty: f64, // best ask qty (auto-converted from string)
 }
 
+/// 为 Binance BookTickerData 实现 BookTickerData trait
+impl BookTickerDataTrait for BookTickerData {
+    fn bid_price(&self) -> f64 {
+        self.best_bid_price
+    }
+    
+    fn bid_quantity(&self) -> f64 {
+        self.best_bid_qty
+    }
+    
+    fn ask_price(&self) -> f64 {
+        self.best_ask_price
+    }
+    
+    fn ask_quantity(&self) -> f64 {
+        self.best_ask_qty
+    }
+    
+    fn symbol(&self) -> &str {
+        &self.symbol
+    }
+    
+    fn event_time(&self) -> i64 {
+        self.event_time
+    }
+    
+    fn exchange(&self) -> Exchange {
+        Exchange::Binance
+    }
+}
+
+/// 为 BookTickerData 实现便利方法
 impl BookTickerData {
     /// 获取买卖价差
     pub fn spread(&self) -> f64 {

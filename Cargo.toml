@@ -89,3 +89,7 @@ path = "src/bin/mexc_test.rs"
 [[bin]]
 name = "api_manager_test"
 path = "src/bin/api_manager_test.rs"
+
+[[bin]]
+name = "book_ticker_test"
+path = "src/bin/book_ticker_test.rs"

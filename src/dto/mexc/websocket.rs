@@ -1,6 +1,6 @@
 use prost::Message;
 use ta::{Close, High, Low, Open, Volume};
-use crate::common::ts::MarketData;
+use crate::common::ts::{MarketData, BookTickerData};
 use crate::common::Exchange;
 
 /// MEXC 官方 PushDataV3ApiWrapper 结构 - 简化版本
@@ -28,6 +28,10 @@ pub struct PushDataV3ApiWrapper {
     // 成交数据
     #[prost(message, optional, tag = "314")]
     pub public_aggre_deals: Option<PublicAggreDealsV3Api>,
+    
+    // Book Ticker 数据
+    #[prost(message, optional, tag = "315")]
+    pub public_aggre_book_ticker: Option<PublicAggreBookTickerV3Api>,
 }
 
 /// MEXC K线数据 - 严格按照官方 .proto 文件定义
@@ -132,5 +136,62 @@ impl PushDataV3ApiWrapper {
     
     pub fn extract_deals_data(&self) -> Option<&PublicAggreDealsV3Api> {
         self.public_aggre_deals.as_ref()
+    }
+    
+    /// 提取 Book Ticker 数据
+    pub fn extract_book_ticker_data(&self) -> Option<&PublicAggreBookTickerV3Api> {
+        self.public_aggre_book_ticker.as_ref()
+    }
+}
+
+/// MEXC Book Ticker 数据 - 严格按照官方 .proto 文件定义
+#[derive(Clone, PartialEq, Message)]
+pub struct PublicAggreBookTickerV3Api {
+    #[prost(string, tag = "1")]
+    pub bid_price: String, // Best bid price
+    
+    #[prost(string, tag = "2")]
+    pub bid_quantity: String, // Best bid quantity
+    
+    #[prost(string, tag = "3")]
+    pub ask_price: String, // Best ask price
+    
+    #[prost(string, tag = "4")]
+    pub ask_quantity: String, // Best ask quantity
+}
+
+
+/// 为 PublicAggreBookTickerV3Api 实现 BookTickerData trait
+impl BookTickerData for PublicAggreBookTickerV3Api {
+    fn bid_price(&self) -> f64 {
+        self.bid_price.parse().unwrap_or(0.0)
+    }
+    
+    fn bid_quantity(&self) -> f64 {
+        self.bid_quantity.parse().unwrap_or(0.0)
+    }
+    
+    fn ask_price(&self) -> f64 {
+        self.ask_price.parse().unwrap_or(0.0)
+    }
+    
+    fn ask_quantity(&self) -> f64 {
+        self.ask_quantity.parse().unwrap_or(0.0)
+    }
+    
+    fn symbol(&self) -> &str {
+        // 这里需要从外部传入，暂时返回空字符串
+        // 在实际使用时，可以通过包装器或者修改结构体来提供
+        ""
+    }
+    
+    fn event_time(&self) -> i64 {
+        // 这里需要从外部传入，暂时返回0
+        // 在实际使用时，可以通过包装器或者修改结构体来提供
+        0
+    }
+    
+    fn exchange(&self) -> Exchange {
+        Exchange::Mexc
     }
 }
