@@ -10,7 +10,6 @@ use url::Url;
 // 导入 MEXC 的 protobuf 结构体和 Message trait
 use crate::dto::mexc::websocket::PushDataV3ApiWrapper;
 use prost::Message as ProstMessage; // 重命名
-use crate::dto::mexc::websocket::PublicAggreBookTickerV3Api;
 use crate::common::ts::BookTickerData;
 
 #[derive(Debug, Clone)]
@@ -111,7 +110,7 @@ impl MexcWebSocket {
                                     break;
                                 }
                             } else {
-                                println!("❌ 包装器中没有K线数据");
+                                eprintln!("❌ 包装器中没有K线数据");
                             }
                         }
                         Err(e) => {
@@ -126,7 +125,7 @@ impl MexcWebSocket {
                     }
                 }
                 WsMessage::Close(_) => {
-                    println!("❌ MEXC WebSocket connection closed");
+                    eprintln!("❌ MEXC WebSocket connection closed");
                     break;
                 }
                 WsMessage::Ping(data) => {
@@ -238,7 +237,7 @@ impl MexcWebSocket {
                                     }
                                 }
                             } else {
-                                println!("❌ 包装器中没有成交数据");
+                                eprintln!("❌ 包装器中没有成交数据");
                             }
                         }
                         Err(e) => {
@@ -253,7 +252,7 @@ impl MexcWebSocket {
                     }
                 }
                 WsMessage::Close(_) => {
-                    println!("❌ MEXC WebSocket connection closed");
+                    eprintln!("❌ MEXC WebSocket connection closed");
                     break;
                 }
                 WsMessage::Ping(data) => {
@@ -279,8 +278,8 @@ impl MexcWebSocket {
         &mut self,
         symbol: &str,
         interval: &str,
-    ) -> Result<mpsc::Receiver<PublicAggreBookTickerV3Api>, Box<dyn std::error::Error>> {
-        let (tx, rx) = mpsc::channel::<PublicAggreBookTickerV3Api>(1000);
+    ) -> Result<mpsc::Receiver<PushDataV3ApiWrapper>, Box<dyn std::error::Error>> {
+        let (tx, rx) = mpsc::channel::<PushDataV3ApiWrapper>(1000);
         let ws_url = self.base_url.clone();
         println!("Connecting to MEXC Book Ticker WebSocket: {}", ws_url);
 
@@ -305,71 +304,49 @@ impl MexcWebSocket {
         let msg = WsMessage::Text(subscribe_text);
         write.send(msg).await?;
 
-        // 处理接收到的消息
-        while let Some(msg) = read.next().await {
-            match msg? {
-                WsMessage::Text(text) => {
-                    println!("📥 收到 Book Ticker 文本消息: {}", text);
-                    
-                    // 对于文本消息，我们只记录日志，不发送到通道
-                    // 因为通道现在只接受 Book Ticker 结构体
-                    println!("📝 收到 Book Ticker 文本消息，跳过发送到通道");
-                }
-                WsMessage::Binary(data) => {
-                    println!("📊 收到 Book Ticker 二进制数据(protobuf)，长度: {}", data.len());
-                    
-                    // 尝试解析 MEXC 官方 protobuf 结构
-                    match crate::dto::mexc::websocket::PushDataV3ApiWrapper::decode(&*data) {
-                        Ok(wrapper) => {
-                            if let Some(book_ticker) = wrapper.extract_book_ticker_data() {
-                                println!("✅ Book Ticker 解析成功: {} | 买价: {} | 买量: {} | 卖价: {} | 卖量: {} | 价差: {:.8} | 中间价: {:.8}", 
-                                    wrapper.channel, book_ticker.bid_price, book_ticker.bid_quantity,
-                                    book_ticker.ask_price, book_ticker.ask_quantity,
-                                    book_ticker.spread(), book_ticker.mid_price());
-                                
-                                // 直接发送 Book Ticker 结构体到通道
-                                if let Err(e) = tx.send(book_ticker.clone()).await {
-                                    eprintln!("Failed to send book ticker: {}", e);
-                                    break;
+        // 在独立的异步任务中处理WebSocket消息
+        let tx_clone = tx.clone();
+        tokio::spawn(async move {
+            while let Some(msg) = read.next().await {
+                match msg {
+                    Ok(WsMessage::Text(text)) => {
+                        // 对于文本消息，我们只记录日志，不发送到通道
+                    }
+                    Ok(WsMessage::Binary(data)) => {
+                        // 尝试解析 MEXC 官方 protobuf 结构
+                        match PushDataV3ApiWrapper::decode(&*data) {
+                            Ok(wrapper) => {
+                                if let Some(book_ticker) = wrapper.extract_book_ticker_data() {
+                                    // 直接发送 wrapper 到通道，不打印任何信息
+                                    if let Err(e) = tx_clone.send(wrapper).await {
+                                        eprintln!("❌ 发送 Book Ticker 数据到通道失败: {}", e);
+                                    }
                                 }
-                            } else {
-                                println!("⚠️  Book Ticker 数据为空");
-                                println!("🔍 调试信息 - Channel: {}, Symbol: {:?}, SendTime: {:?}", 
-                                    wrapper.channel, wrapper.symbol, wrapper.send_time);
-                                
-                                // 对于空数据，我们只记录日志，不发送到通道
-                                // 因为通道现在只接受 Book Ticker 结构体
-                                println!("📝 Book Ticker 数据为空，跳过发送到通道");
+                            }
+                            Err(e) => {
+                                eprintln!("❌ 解析 Book Ticker protobuf 失败: {}", e);
                             }
                         }
-                        Err(e) => {
-                            println!("❌ Book Ticker protobuf 解析失败: {}", e);
-                            println!("🔍 原始数据长度: {} 字节", data.len());
-                            
-                            // 对于解析失败的数据，我们只记录日志，不发送到通道
-                            // 因为通道现在只接受 Book Ticker 结构体
-                            println!("📝 Protobuf 解析失败，跳过发送到通道");
-                        }
                     }
-                }
-                WsMessage::Close(_) => {
-                    println!("❌ MEXC Book Ticker WebSocket connection closed");
-                    break;
-                }
-                WsMessage::Ping(data) => {
-                    println!("🏓 收到 Ping，发送 Pong 响应");
-                    let pong_msg = WsMessage::Pong(data);
-                    if let Err(e) = write.send(pong_msg).await {
-                        eprintln!("Failed to send pong: {}", e);
+                    Ok(WsMessage::Close(_)) => {
+                        eprintln!("❌ MEXC Book Ticker WebSocket connection closed");
                         break;
                     }
+                    Ok(WsMessage::Ping(data)) => {
+                        println!("🏓 收到 Ping，发送 Pong 响应");
+                        let pong_msg = WsMessage::Pong(data);
+                        if let Err(e) = write.send(pong_msg).await {
+                            eprintln!("Failed to send pong: {}", e);
+                            break;
+                        }
+                    }
+                    Ok(WsMessage::Pong(_)) => {
+                        println!("🏓 收到 Pong");
+                    }
+                    _ => {}
                 }
-                WsMessage::Pong(_) => {
-                    println!("🏓 收到 Pong");
-                }
-                _ => {}
             }
-        }
+        });
 
         Ok(rx)
     }
@@ -379,8 +356,8 @@ impl MexcWebSocket {
         &mut self,
         symbols: Vec<String>,
         interval: &str,
-    ) -> Result<mpsc::Receiver<PublicAggreBookTickerV3Api>, Box<dyn std::error::Error>> {
-        let (tx, rx) = mpsc::channel::<PublicAggreBookTickerV3Api>(1000);
+    ) -> Result<mpsc::Receiver<PushDataV3ApiWrapper>, Box<dyn std::error::Error>> {
+        let (tx, rx) = mpsc::channel::<PushDataV3ApiWrapper>(1000);
         let ws_url = self.base_url.clone();
         println!("Connecting to MEXC Multiple Book Ticker WebSocket: {}", ws_url);
 
@@ -424,22 +401,20 @@ impl MexcWebSocket {
                     println!("📊 收到多 Book Ticker 二进制数据(protobuf)，长度: {}", data.len());
                     
                     // 尝试解析 MEXC 官方 protobuf 结构
-                    match crate::dto::mexc::websocket::PushDataV3ApiWrapper::decode(&*data) {
+                    match PushDataV3ApiWrapper::decode(&*data) {
                         Ok(wrapper) => {
                             if let Some(book_ticker) = wrapper.extract_book_ticker_data() {
-                                println!("✅ 多 Book Ticker 解析成功: {} | 买价: {} | 买量: {} | 卖价: {} | 卖量: {} | 价差: {:.8} | 中间价: {:.8}", 
-                                    wrapper.channel, book_ticker.bid_price, book_ticker.bid_quantity,
-                                    book_ticker.ask_price, book_ticker.ask_quantity,
-                                    book_ticker.spread(), book_ticker.mid_price());
+                                println!("📊 收到多 Book Ticker 数据: {} | 价差: {:.8} | 中间价: {:.8}", 
+                                    wrapper.channel, wrapper.spread(), wrapper.mid_price());
                                 
                                 // 直接发送 Book Ticker 结构体到通道
-                                if let Err(e) = tx.send(book_ticker.clone()).await {
+                                if let Err(e) = tx.send(wrapper).await {
                                     eprintln!("Failed to send book ticker: {}", e);
                                     break;
                                 }
                             } else {
-                                println!("⚠️  多 Book Ticker 数据为空");
-                                println!("🔍 调试信息 - Channel: {}, Symbol: {:?}, SendTime: {:?}", 
+                                eprintln!("⚠️  多 Book Ticker 数据为空");
+                                eprintln!("🔍 调试信息 - Channel: {}, Symbol: {:?}, SendTime: {:?}", 
                                     wrapper.channel, wrapper.symbol, wrapper.send_time);
                                 
                                 // 对于空数据，我们只记录日志，不发送到通道
@@ -448,8 +423,8 @@ impl MexcWebSocket {
                             }
                         }
                         Err(e) => {
-                            println!("❌ 多 Book Ticker protobuf 解析失败: {}", e);
-                            println!("🔍 原始数据长度: {} 字节", data.len());
+                            eprintln!("❌ 多 Book Ticker protobuf 解析失败: {}", e);
+                            eprintln!("🔍 原始数据长度: {} 字节", data.len());
                             
                             // 对于解析失败的数据，我们只记录日志，不发送到通道
                             // 因为通道现在只接受 Book Ticker 结构体
@@ -458,7 +433,7 @@ impl MexcWebSocket {
                     }
                 }
                 WsMessage::Close(_) => {
-                    println!("❌ MEXC Multiple Book Ticker WebSocket connection closed");
+                    eprintln!("❌ MEXC Multiple Book Ticker WebSocket connection closed");
                     break;
                 }
                 WsMessage::Ping(data) => {
@@ -573,7 +548,7 @@ impl MexcWebSocket {
                     }
                 }
                 WsMessage::Close(_) => {
-                    println!("❌ MEXC WebSocket connection closed");
+                    eprintln!("❌ MEXC WebSocket connection closed");
                     break;
                 }
                 WsMessage::Ping(data) => {

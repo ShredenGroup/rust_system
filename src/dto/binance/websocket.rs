@@ -5,6 +5,8 @@ use serde_with::{DisplayFromStr, serde_as};
 use ta::{Close, High, Low, Not, Open, Qav, Tbbav, Tbqav, Volume};
 use crate::common::ts::IsClosed;
 use crate::common::ts::BookTickerData as BookTickerDataTrait;
+use crate::common::ts::TransactionTime;
+use crate::common::ts::PushTime;
 /// 标记价格数据 - 使用 serde_with 自动转换字符串到数值
 #[serde_as]
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -324,6 +326,18 @@ impl BookTickerDataTrait for BookTickerData {
     
     fn exchange(&self) -> Exchange {
         Exchange::Binance
+    }
+}
+
+impl TransactionTime for BookTickerData {
+    fn transaction_time(&self) -> i64 {
+        self.transaction_time
+    }
+}
+
+impl PushTime for BookTickerData {
+    fn push_time(&self) -> i64 {
+        self.event_time
     }
 }
 

@@ -1,6 +1,6 @@
 use prost::Message;
 use ta::{Close, High, Low, Open, Volume};
-use crate::common::ts::{MarketData, BookTickerData};
+use crate::common::ts::{MarketData, BookTickerData, TransactionTime, PushTime};
 use crate::common::Exchange;
 
 /// MEXC 官方 PushDataV3ApiWrapper 结构 - 简化版本
@@ -193,5 +193,62 @@ impl BookTickerData for PublicAggreBookTickerV3Api {
     
     fn exchange(&self) -> Exchange {
         Exchange::Mexc
+    }
+}
+
+/// 为 PushDataV3ApiWrapper 实现 BookTickerData trait
+impl BookTickerData for PushDataV3ApiWrapper {
+    fn bid_price(&self) -> f64 {
+        self.public_aggre_book_ticker
+            .as_ref()
+            .map(|ticker| ticker.bid_price.parse().unwrap_or(0.0))
+            .unwrap_or(0.0)
+    }
+    
+    fn bid_quantity(&self) -> f64 {
+        self.public_aggre_book_ticker
+            .as_ref()
+            .map(|ticker| ticker.bid_quantity.parse().unwrap_or(0.0))
+            .unwrap_or(0.0)
+    }
+    
+    fn ask_price(&self) -> f64 {
+        self.public_aggre_book_ticker
+            .as_ref()
+            .map(|ticker| ticker.ask_price.parse().unwrap_or(0.0))
+            .unwrap_or(0.0)
+    }
+    
+    fn ask_quantity(&self) -> f64 {
+        self.public_aggre_book_ticker
+            .as_ref()
+            .map(|ticker| ticker.ask_quantity.parse().unwrap_or(0.0))
+            .unwrap_or(0.0)
+    }
+    
+    fn symbol(&self) -> &str {
+        self.symbol.as_deref().unwrap_or("")
+    }
+    
+    fn event_time(&self) -> i64 {
+        self.send_time.unwrap_or(0)
+    }
+    
+    fn exchange(&self) -> Exchange {
+        Exchange::Mexc
+    }
+}
+
+impl TransactionTime for PushDataV3ApiWrapper {
+    fn transaction_time(&self) -> i64 {
+        // 如果 create_time 不存在，使用 send_time 作为备选
+        // 因为 MEXC 的 Book Ticker 数据本身就是实时更新的
+        self.create_time.unwrap_or_else(|| self.send_time.unwrap_or(0))
+    }
+}
+
+impl PushTime for PushDataV3ApiWrapper {
+    fn push_time(&self) -> i64 {
+        self.send_time.unwrap_or(0)
     }
 }

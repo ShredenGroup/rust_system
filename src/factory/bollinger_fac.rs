@@ -105,7 +105,7 @@ impl BollingerFactory {
         info!("📊 获取历史K线数据进行初始化...");
         api_manager.get_history_klines(
             TURBO_USDT_SYMBOL.to_string(),
-            "1m".to_string(),
+            "1h".to_string(),
             None,
             None,
             Some("21".to_string()),  // 获取足够的K线用于初始化
@@ -143,7 +143,7 @@ impl BollingerFactory {
 
         // 配置WebSocket连接
         let symbol = TURBO_USDT_SYMBOL.to_lowercase();
-        let interval = "1m";
+        let interval = "1h";
         let kline_config = KlineConfig::new(
             &symbol,
             interval,

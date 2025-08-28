@@ -74,7 +74,7 @@ impl BollingerStrategy {
         if self.current_signal == 0 {  // 只有在没有持仓时才开新仓
             if close_price >= upper_band {
                 // 触及上轨，做空
-                let stop_price = close_price + (2.0 * atr_value);
+                let stop_price = close_price + (1.0 * atr_value);
                 // 限制止损价格精度，避免币安精度错误
                 let stop_price = (stop_price * 1000000.0).round() / 1000000.0; // 限制到6位小数
                 
@@ -94,7 +94,7 @@ impl BollingerStrategy {
                 ));
             } else if close_price <= lower_band {
                 // 触及下轨，做多
-                let stop_price = close_price - (2.0 * atr_value);
+                let stop_price = close_price - (1.0 * atr_value);
                 // 限制止损价格精度，避免币安精度错误
                 let stop_price = (stop_price * 1000000.0).round() / 1000000.0; // 限制到6位小数
                 

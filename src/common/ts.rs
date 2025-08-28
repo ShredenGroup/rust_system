@@ -74,3 +74,13 @@ pub trait BookTickerData: Send + Sync {
     /// 获取交易所
     fn exchange(&self) -> Exchange;
 }
+
+/// 交易时间 trait - 获取真实的市场事件发生时间
+pub trait TransactionTime {
+    fn transaction_time(&self) -> i64;
+}
+
+/// 推送时间 trait - 获取消息从交易所推送出来的时间
+pub trait PushTime {
+    fn push_time(&self) -> i64;
+}
