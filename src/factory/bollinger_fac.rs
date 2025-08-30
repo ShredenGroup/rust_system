@@ -18,7 +18,7 @@ use anyhow::Result;
 use chrono::{DateTime, Local};
 use std::time::Instant;
 use tracing::{info, debug, error};
-use tracing_subscriber::{EnvFilter, prelude::*};
+use tracing_subscriber::EnvFilter;
 use std::fs;
 use std::path::Path;
 use std::collections::HashMap;
@@ -114,10 +114,36 @@ impl BollingerFactory {
         // 等待并处理历史数据
         if let Some(message) = api_rx.recv().await {
             match message {
-                ApiMessage::Kline(kline_data) => {
-                    info!("📈 收到历史K线数据: {} 根", kline_data.len());
-                    for kline in kline_data.iter() {
-                        if let Some(signal) = bollinger_strategy.on_kline_update(kline) {
+                ApiMessage::Kline(kline_data_list) => {
+                    info!("📈 收到历史K线数据: {} 根", kline_data_list.len());
+                    for kline in kline_data_list.iter() {
+                        // 构造 KlineData 结构
+                        let kline_data = crate::dto::binance::websocket::KlineData {
+                            event_type: "kline".to_string(),
+                            event_time: kline.open_time,
+                            symbol: crate::common::TradingSymbol::from_string(TURBO_USDT_SYMBOL.to_string()),
+                            kline: crate::dto::binance::websocket::KlineInfo {
+                                start_time: kline.open_time,
+                                close_time: kline.close_time,
+                                symbol: crate::common::TradingSymbol::from_string(TURBO_USDT_SYMBOL.to_string()),
+                                interval: "1h".to_string(), // 使用配置的间隔
+                                first_trade_id: 0,
+                                last_trade_id: 0,
+                                open_price: kline.open,
+                                close_price: kline.close,
+                                high_price: kline.high,
+                                low_price: kline.low,
+                                base_volume: kline.volume,
+                                trade_count: kline.trades_count,
+                                is_closed: true, // 历史数据都是已完成的
+                                quote_volume: kline.quote_volume,
+                                taker_buy_base_volume: kline.taker_buy_volume,
+                                taker_buy_quote_volume: kline.taker_buy_quote_volume,
+                                ignore: "".to_string(),
+                            },
+                        };
+                        
+                        if let Some(signal) = bollinger_strategy.on_kline_update(&kline_data) {
                             info!("⚡ 历史数据产生信号:");
                             let timestamp = DateTime::from_timestamp_millis(kline.open_time).unwrap();
                             info!("   时间: {}", timestamp.format("%Y-%m-%d %H:%M:%S"));
@@ -128,8 +154,8 @@ impl BollingerFactory {
                             debug!("📤 发送历史信号到信号管理器（仅记录）");
                         }
                         // 打印布林带值
-                        let bb_output = bollinger_strategy.bollinger.next(kline);
-                        let atr_value = bollinger_strategy.atr.next(kline);
+                        let bb_output = bollinger_strategy.bollinger.next(&kline_data);
+                        let atr_value = bollinger_strategy.atr.next(&kline_data);
                         debug!("   布林带值: {:.2}/{:.2}/{:.2}, ATR: {:.2}", 
                             bb_output.upper, bb_output.average, bb_output.lower, atr_value);
                     }
@@ -201,7 +227,7 @@ impl BollingerFactory {
                         kline_info.is_closed);
 
                     let strategy_start_time = Instant::now();
-                    if let Some(signal) = bollinger_strategy.on_kline_update(kline_info) {
+                    if let Some(signal) = bollinger_strategy.on_kline_update(kline_data.as_ref()) {
                         let strategy_latency = strategy_start_time.elapsed().as_secs_f64() * 1000.0;
                         signal_count += 1;
 

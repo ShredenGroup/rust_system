@@ -64,7 +64,14 @@ impl BinanceFuturesApi {
             return Err(anyhow::anyhow!("API request failed: {}", error_text));
         }
         
-        let klines = response.json().await?;
+        let mut klines: KlineResponse = response.json().await?;
+        
+        // 为每个 KlineData 设置 symbol
+        let trading_symbol = crate::common::TradingSymbol::from_string(request.symbol.clone());
+        for kline in &mut klines {
+            kline.symbol = trading_symbol.clone();
+        }
+        
         Ok(klines)
     }
 

@@ -1,5 +1,6 @@
 use crate::common::Exchange;
 use crate::common::ts::MarketData;
+use crate::common::TradingSymbol;
 use serde::{Deserialize, Serialize};
 use serde_with::{DisplayFromStr, serde_as};
 use ta::{Close, High, Low, Not, Open, Qav, Tbbav, Tbqav, Volume};
@@ -7,11 +8,12 @@ use crate::common::ts::IsClosed;
 use crate::common::ts::BookTickerData as BookTickerDataTrait;
 use crate::common::ts::TransactionTime;
 use crate::common::ts::PushTime;
+use crate::common::ts::Symbol;
 /// 标记价格数据 - 使用 serde_with 自动转换字符串到数值
 #[serde_as]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MarkPriceData {
-    pub symbol: String,
+    pub symbol: TradingSymbol,
 
     #[serde_as(as = "DisplayFromStr")]
     pub mark_price: f64, // 标记价格 (auto-converted from string)
@@ -47,7 +49,7 @@ pub struct DepthUpdateData {
     pub transaction_time: i64, // Transaction time
 
     #[serde(rename = "s")]
-    pub symbol: String, // Symbol
+    pub symbol: TradingSymbol, // Symbol
 
     #[serde(rename = "U")]
     pub first_update_id: i64, // First update ID in event
@@ -105,7 +107,7 @@ pub struct KlineData {
     pub event_time: i64, // Event time
 
     #[serde(rename = "s")]
-    pub symbol: String, // Symbol
+    pub symbol: TradingSymbol, // Symbol
 
     #[serde(rename = "k")]
     pub kline: KlineInfo,
@@ -122,7 +124,7 @@ pub struct KlineInfo {
     pub close_time: i64, // Kline close time
 
     #[serde(rename = "s")]
-    pub symbol: String, // Symbol
+    pub symbol: TradingSymbol, // Symbol
 
     #[serde(rename = "i")]
     pub interval: String, // Interval
@@ -182,75 +184,101 @@ pub struct KlineInfo {
 
 // 为 KlineInfo 实现 ta-rs 的 trait - 现在直接使用字段
 
-impl MarketData for KlineInfo {
+// 所有 trait 实现转移到 KlineData
+
+impl Symbol for KlineData {
+    fn symbol(&self) -> &str {
+        self.symbol.as_str()
+    }
+}
+
+impl KlineData {
+    /// 获取交易符号的引用
+    pub fn trading_symbol(&self) -> &TradingSymbol {
+        &self.symbol
+    }
+}
+
+impl MarketData for KlineData {
     fn which_exchange(&self) -> Exchange {
         Exchange::Binance
     }
 }
-impl Open for KlineInfo {
+
+impl Open for KlineData {
     fn open(&self) -> f64 {
-        self.open_price
+        self.kline.open_price
     }
 }
 
-impl High for KlineInfo {
+impl High for KlineData {
     fn high(&self) -> f64 {
-        self.high_price
+        self.kline.high_price
     }
 }
 
-impl Low for KlineInfo {
+impl Low for KlineData {
     fn low(&self) -> f64 {
-        self.low_price
+        self.kline.low_price
     }
 }
 
-impl Close for KlineInfo {
+impl Close for KlineData {
     fn close(&self) -> f64 {
-        self.close_price
+        self.kline.close_price
     }
 }
 
-impl Volume for KlineInfo {
+impl Volume for KlineData {
     fn volume(&self) -> f64 {
-        self.base_volume
+        self.kline.base_volume
     }
 }
 
-impl Qav for KlineInfo {
+impl Qav for KlineData {
     fn qav(&self) -> Option<f64> {
-        let volume = self.quote_volume;
+        let volume = self.kline.quote_volume;
         if volume == 0.0 { None } else { Some(volume) }
     }
 }
 
-impl Tbqav for KlineInfo {
+impl Tbqav for KlineData {
     fn tbqav(&self) -> Option<f64> {
-        let volume = self.taker_buy_quote_volume;
+        let volume = self.kline.taker_buy_quote_volume;
         if volume == 0.0 { None } else { Some(volume) }
     }
 }
 
-// 添加 Tbbav trait 实现
-impl Tbbav for KlineInfo {
+impl Tbbav for KlineData {
     fn tbbav(&self) -> Option<f64> {
-        let volume = self.taker_buy_base_volume;
+        let volume = self.kline.taker_buy_base_volume;
         if volume == 0.0 { None } else { Some(volume) }
     }
 }
 
-impl Not for KlineInfo {
+impl Not for KlineData {
     fn not(&self) -> Option<u64> {
-        Some(self.trade_count)
+        Some(self.kline.trade_count)
     }
 }
 
-impl IsClosed for KlineInfo {
+impl IsClosed for KlineData {
     fn is_closed(&self) -> bool {
-        self.is_closed
+        self.kline.is_closed
     }
 }
 
+impl TransactionTime for KlineData {
+    fn transaction_time(&self) -> i64 {
+        self.kline.close_time
+    }
+}
+
+impl PushTime for KlineData {
+    fn push_time(&self) -> i64 {
+        self.event_time
+    }
+}
 // 为 KlineInfo 实现 Taker Buy Base Asset Volume trait
 // 注意：这个trait可能在ta-rs中不存在，所以我们先注释掉
 // impl Tabbav for KlineInfo {
@@ -279,7 +307,7 @@ pub struct BookTickerData {
     pub transaction_time: i64, // transaction time
     
     #[serde(rename = "s")]
-    pub symbol: String, // symbol
+    pub symbol: TradingSymbol, // symbol
     
     #[serde_as(as = "DisplayFromStr")]
     #[serde(rename = "b")]
@@ -317,7 +345,7 @@ impl BookTickerDataTrait for BookTickerData {
     }
     
     fn symbol(&self) -> &str {
-        &self.symbol
+        self.symbol.as_str()
     }
     
     fn event_time(&self) -> i64 {
@@ -397,7 +425,7 @@ mod tests {
 
         let data: KlineData = serde_json::from_str(json_str).unwrap();
 
-        assert_eq!(data.symbol, "BTCUSDT");
+        assert_eq!(data.symbol.as_str(), "BTCUSDT");
         assert_eq!(data.event_type, "kline");
         assert_eq!(data.kline.interval, "1m");
         assert_eq!(data.kline.open_price, 0.0010);
@@ -436,16 +464,16 @@ mod tests {
         assert!(result.is_ok(), "应该成功解析，忽略多余字段");
 
         let kline = result.unwrap();
-        assert_eq!(kline.symbol, "BTCUSDT");
+        assert_eq!(kline.symbol.as_str(), "BTCUSDT");
         assert_eq!(kline.open_price, 0.0010);
     }
 
     #[test]
     fn test_ta_rs_traits() {
-        let kline = KlineInfo {
+        let kline_info = KlineInfo {
             start_time: 1638747660000,
             close_time: 1638747719999,
-            symbol: "BTCUSDT".to_string(),
+            symbol: TradingSymbol::BTCUSDT,
             interval: "1m".to_string(),
             first_trade_id: 100,
             last_trade_id: 200,
@@ -462,15 +490,29 @@ mod tests {
             ignore: "ignore".to_string(),
         };
 
+        let kline_data = KlineData {
+            event_type: "kline".to_string(),
+            event_time: 1638747660000,
+            symbol: TradingSymbol::BTCUSDT,
+            kline: kline_info,
+        };
+
         // 测试 ta-rs traits
-        assert_eq!(kline.open(), 50000.0);
-        assert_eq!(kline.close(), 51000.0);
-        assert_eq!(kline.high(), 52000.0);
-        assert_eq!(kline.low(), 49000.0);
-        assert_eq!(kline.volume(), 1000.0);
-        assert_eq!(kline.qav(), Some(50000000.0));
-        assert_eq!(kline.tbqav(), Some(30000000.0));
-        assert_eq!(kline.not(), Some(100));
+        assert_eq!(kline_data.open(), 50000.0);
+        assert_eq!(kline_data.close(), 51000.0);
+        assert_eq!(kline_data.high(), 52000.0);
+        assert_eq!(kline_data.low(), 49000.0);
+        assert_eq!(kline_data.volume(), 1000.0);
+        assert_eq!(kline_data.qav(), Some(50000000.0));
+        assert_eq!(kline_data.tbqav(), Some(30000000.0));
+        assert_eq!(kline_data.not(), Some(100));
+        assert_eq!(kline_data.symbol(), "BTCUSDT");
+        assert_eq!(kline_data.is_closed(), true);
+        
+        // 测试 trading_symbol 方法
+        let trading_symbol = kline_data.trading_symbol();
+        assert_eq!(trading_symbol.as_str(), "BTCUSDT");
+        assert!(trading_symbol.is_predefined());
     }
 
     #[test]
@@ -488,7 +530,7 @@ mod tests {
 
         let data: MarkPriceData = serde_json::from_str(json_str).unwrap();
 
-        assert_eq!(data.symbol, "BTCUSDT");
+        assert_eq!(data.symbol.as_str(), "BTCUSDT");
         assert_eq!(data.mark_price, 50000.0);
         assert_eq!(data.index_price, 50001.0);
         assert_eq!(data.estimated_settle_price, 50000.5);
@@ -514,7 +556,7 @@ mod tests {
 
         let data: DepthUpdateData = serde_json::from_str(json_str).unwrap();
 
-        assert_eq!(data.symbol, "ETHUSDT");
+        assert_eq!(data.symbol.as_str(), "ETHUSDT");
         assert_eq!(data.event_type, "depthUpdate");
         assert_eq!(data.bids.len(), 2);
         assert_eq!(data.asks.len(), 2);
@@ -552,14 +594,14 @@ mod tests {
         assert_eq!(data.order_book_update_id, 400900217);
         assert_eq!(data.event_time, 1568014460893);
         assert_eq!(data.transaction_time, 1568014460891);
-        assert_eq!(data.symbol, "BNBUSDT");
+        assert_eq!(data.symbol.as_str(), "BNBUSDT");
         assert_eq!(data.best_bid_price, 25.35190000);
         assert_eq!(data.best_bid_qty, 31.21000000);
         assert_eq!(data.best_ask_price, 25.36520000);
         assert_eq!(data.best_ask_qty, 40.66000000);
 
-        // 测试便利方法
-        assert_eq!(data.spread(), 0.0133);
+        // 测试便利方法 - 使用近似比较来处理浮点数精度
+        assert!((data.spread() - 0.0133).abs() < 1e-10);
         assert_eq!(data.mid_price(), 25.35855);
         assert!((data.spread_percentage() - 0.0524).abs() < 0.0001);
         assert!(data.has_valid_prices());

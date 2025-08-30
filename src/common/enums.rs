@@ -11,6 +11,7 @@ pub enum StrategyName {
     MACD = 0,
     HBFC = 1,
     BOLLINGER = 2,
+    TURTLE = 3,
 }
 
 #[derive(Debug, Clone, PartialEq)]

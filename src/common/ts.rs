@@ -1,7 +1,7 @@
 use super::Exchange;
 use ndarray::Array;
 use ndarray::Ix2;
-use super::StrategyName;
+use super::{StrategyName,TradingSymbol};
 pub trait ToArray {
     fn to_ndarray(&self) -> Array<f32, Ix2>;
 }
@@ -79,8 +79,13 @@ pub trait BookTickerData: Send + Sync {
 pub trait TransactionTime {
     fn transaction_time(&self) -> i64;
 }
-
+pub trait Symbol{
+    fn symbol(&self) -> &str;
+}
 /// 推送时间 trait - 获取消息从交易所推送出来的时间
 pub trait PushTime {
     fn push_time(&self) -> i64;
+}
+pub trait SymbolEnum{
+    fn symbol_enum(&self) -> TradingSymbol;
 }

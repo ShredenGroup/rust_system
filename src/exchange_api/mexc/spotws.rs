@@ -1,8 +1,6 @@
-use anyhow::Result;
 use futures::{StreamExt, SinkExt}; // 添加 SinkExt
 use serde_json;
 use std::time::Duration;
-use std::time::Instant;
 use tokio::sync::mpsc;
 use tokio_tungstenite::{connect_async, tungstenite::protocol::Message as WsMessage}; // 重命名
 use url::Url;
@@ -38,7 +36,7 @@ impl MexcWebSocket {
         symbol: &str,
         interval: &str,
         tx: mpsc::UnboundedSender<String>, // 暂时用String，后续解析protobuf
-    ) -> Result<()> {
+    ) -> anyhow::Result<()> {
         let ws_url = self.base_url.clone();
         println!("Connecting to MEXC WebSocket: {}", ws_url);
 
@@ -157,7 +155,7 @@ impl MexcWebSocket {
         symbol: &str,
         interval: &str,
         tx: mpsc::UnboundedSender<String>,
-    ) -> Result<()> {
+    ) -> anyhow::Result<()> {
         let ws_url = self.base_url.clone();
         println!("Connecting to MEXC WebSocket for deals: {}", ws_url);
 
@@ -278,7 +276,7 @@ impl MexcWebSocket {
         &mut self,
         symbol: &str,
         interval: &str,
-    ) -> Result<mpsc::Receiver<PushDataV3ApiWrapper>, Box<dyn std::error::Error>> {
+    ) -> anyhow::Result<mpsc::Receiver<PushDataV3ApiWrapper>> {
         let (tx, rx) = mpsc::channel::<PushDataV3ApiWrapper>(1000);
         let ws_url = self.base_url.clone();
         println!("Connecting to MEXC Book Ticker WebSocket: {}", ws_url);
@@ -356,7 +354,7 @@ impl MexcWebSocket {
         &mut self,
         symbols: Vec<String>,
         interval: &str,
-    ) -> Result<mpsc::Receiver<PushDataV3ApiWrapper>, Box<dyn std::error::Error>> {
+    ) -> anyhow::Result<mpsc::Receiver<PushDataV3ApiWrapper>> {
         let (tx, rx) = mpsc::channel::<PushDataV3ApiWrapper>(1000);
         let ws_url = self.base_url.clone();
         println!("Connecting to MEXC Multiple Book Ticker WebSocket: {}", ws_url);
@@ -462,7 +460,7 @@ impl MexcWebSocket {
         tx: mpsc::UnboundedSender<String>,
         max_retries: usize,
         retry_delay: Duration,
-    ) -> Result<()> {
+    ) -> anyhow::Result<()> {
         let mut retry_count = 0;
 
         loop {
@@ -496,7 +494,7 @@ impl MexcWebSocket {
         &self,
         subscriptions: Vec<(String, String)>, // (symbol, interval)
         tx: mpsc::UnboundedSender<String>,
-    ) -> Result<()> {
+    ) -> anyhow::Result<()> {
         let ws_url = self.base_url.clone();
         println!("Connecting to MEXC WebSocket for multiple subscriptions: {}", ws_url);
 
@@ -640,61 +638,49 @@ mod tests {
 
     #[tokio::test]
     async fn test_book_ticker_subscription() {
-        let ws = MexcWebSocket::new();
-        let (tx, mut rx) = mpsc::unbounded_channel();
+        let mut ws = MexcWebSocket::new();
 
         // 启动 Book Ticker WebSocket 连接
         let symbol = "BTCUSDT";
         let interval = "100ms";
 
-        let ws_handle = tokio::spawn(async move { 
-            ws.subscribe_book_ticker(symbol, interval).await 
-        });
+        let mut rx = ws.subscribe_book_ticker(symbol, interval).await.unwrap();
 
         // 接收几条消息
         let mut message_count = 0;
         let max_messages = 5;
 
         while let Some(data) = rx.recv().await {
-            println!("Received Book Ticker: {}", data);
+            println!("Received Book Ticker: {:?}", data);
             message_count += 1;
 
             if message_count >= max_messages {
                 break;
             }
         }
-
-        // 等待 WebSocket 任务完成
-        let _ = ws_handle.await;
     }
 
     #[tokio::test]
     async fn test_multiple_book_tickers_subscription() {
-        let ws = MexcWebSocket::new();
-        let (tx, mut rx) = mpsc::unbounded_channel();
+        let mut ws = MexcWebSocket::new();
 
         // 订阅多个交易对的 Book Ticker
         let symbols = vec!["BTCUSDT".to_string(), "ETHUSDT".to_string()];
         let interval = "100ms";
 
-        let ws_handle = tokio::spawn(async move { 
-            ws.subscribe_multiple_book_tickers(symbols, interval).await 
-        });
+        let mut rx = ws.subscribe_multiple_book_tickers(symbols, interval).await.unwrap();
 
         // 接收几条消息
         let mut message_count = 0;
         let max_messages = 10;
 
         while let Some(data) = rx.recv().await {
-            println!("Received Multiple Book Ticker: {}", data);
+            println!("Received Multiple Book Ticker: {:?}", data);
             message_count += 1;
 
             if message_count >= max_messages {
                 break;
             }
         }
-
-        // 等待 WebSocket 任务完成
-        let _ = ws_handle.await;
     }
 }

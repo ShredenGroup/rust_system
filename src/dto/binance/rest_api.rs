@@ -1,10 +1,10 @@
-use hmac::digest::consts::True;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use anyhow::Result;
 use ta::{Close, High, Low, Not, Open, Qav, Tbbav, Tbqav, Volume};
 use std::str::FromStr;
-use crate::common::ts::IsClosed;
+use crate::common::ts::{IsClosed, Symbol, MarketData, TransactionTime};
+use crate::common::{Exchange, TradingSymbol};
 /// 订单类型枚举
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "SCREAMING_SNAKE_CASE")]
@@ -53,6 +53,9 @@ pub struct KlineRequest {
 /// K线数据响应（REST API格式）
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct KlineData {
+    /// 交易对符号 - 不从JSON反序列化，需要手动设置
+    #[serde(skip)]
+    pub symbol: TradingSymbol,
     #[serde(rename = "0")]
     pub open_time: i64,
     #[serde(rename = "1")]
@@ -162,7 +165,28 @@ impl IsClosed for KlineData{
     fn is_closed(&self) -> bool {
         true
     }
-} 
+}
+
+impl Symbol for KlineData {
+    fn symbol(&self) -> &str {
+        self.symbol.as_str()
+    }
+}
+
+impl MarketData for KlineData {
+    fn which_exchange(&self) -> Exchange {
+        Exchange::Binance
+    }
+}
+
+impl TransactionTime for KlineData {
+    fn transaction_time(&self) -> i64 {
+        self.close_time
+    }
+}
+
+
+
 /// K线数据响应类型别名
 pub type KlineResponse = Vec<KlineData>;
 
@@ -364,7 +388,9 @@ mod tests {
             "0.00"
         ]"#;
 
-        let kline: KlineData = serde_json::from_str(json_str).unwrap();
+        let mut kline: KlineData = serde_json::from_str(json_str).unwrap();
+        kline.symbol = TradingSymbol::BTCUSDT;
+        assert_eq!(kline.symbol.as_str(), "BTCUSDT");
         assert_eq!(kline.open_time, 1640995200000);
         assert_eq!(kline.open, 50000.0);
         assert_eq!(kline.high, 51000.0);
@@ -375,5 +401,50 @@ mod tests {
         assert_eq!(kline.taker_buy_volume, 600.0);
         assert_eq!(kline.taker_buy_quote_volume, 30150000.0);
         assert_eq!(kline.ignore, 0.0);
+    }
+
+    #[test]
+    fn test_symbol_trait_implementation() {
+        use crate::common::ts::Symbol;
+        
+        let json_str = r#"[
+            1640995200000,
+            "50000.00",
+            "51000.00",
+            "49000.00",
+            "50500.00",
+            "1000.00",
+            1640995259999,
+            "50250000.00",
+            1000,
+            "600.00",
+            "30150000.00",
+            "0.00"
+        ]"#;
+
+        let mut kline: KlineData = serde_json::from_str(json_str).unwrap();
+        kline.symbol = TradingSymbol::ETHUSDT;
+        assert_eq!(kline.symbol(), "ETHUSDT");
+    }
+
+    #[test]
+    fn test_manual_symbol_setting() {
+        let json_data = r#"[
+            [1640995200000, "50000.00", "51000.00", "49000.00", "50500.00", "1000.00", 1640995259999, "50250000.00", 1000, "600.00", "30150000.00", "0.00"],
+            [1640995260000, "50500.00", "51500.00", "49500.00", "51000.00", "1100.00", 1640995319999, "55275000.00", 1100, "660.00", "33165000.00", "0.00"]
+        ]"#;
+
+        let mut klines: Vec<KlineData> = serde_json::from_str(json_data).unwrap();
+        
+        // 手动为每个 KlineData 设置 symbol
+        for kline in &mut klines {
+            kline.symbol = TradingSymbol::BTCUSDT;
+        }
+        
+        assert_eq!(klines.len(), 2);
+        assert_eq!(klines[0].symbol.as_str(), "BTCUSDT");
+        assert_eq!(klines[1].symbol.as_str(), "BTCUSDT");
+        assert_eq!(klines[0].open, 50000.0);
+        assert_eq!(klines[1].open, 50500.0);
     }
 } 

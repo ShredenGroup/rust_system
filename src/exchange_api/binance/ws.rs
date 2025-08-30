@@ -521,7 +521,7 @@ mod tests {
     #[test]
     fn test_serialization_performance() {
         let data = MarkPriceData {
-            symbol: "BTCUSDT".to_string(),
+            symbol: crate::common::TradingSymbol::BTCUSDT,
             mark_price: 50000.0,
             index_price: 50001.0,
             estimated_settle_price: 50000.5,
@@ -561,7 +561,7 @@ mod tests {
 
         let data: DepthUpdateData = serde_json::from_str(json_str).unwrap();
 
-        assert_eq!(data.symbol, "ETHUSDT");
+        assert_eq!(data.symbol.as_str(), "ETHUSDT");
         assert_eq!(data.event_type, "depthUpdate");
         assert_eq!(data.bids.len(), 1);
         assert_eq!(data.asks.len(), 1);
