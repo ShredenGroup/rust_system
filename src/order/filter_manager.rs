@@ -31,8 +31,10 @@ impl SignalManager {
         // 使用多个任务并发处理信号
         let mut handles = Vec::new();
         
+        tracing::info!("🚀 SignalManager开始等待信号...");
+        
         while let Some(signal) = self.signal_receiver.recv().await {
-            println!("📥 接收到信号: 策略={:?}, 交易对={}, 方向={:?}", 
+            tracing::info!("📥 接收到信号: 策略={:?}, 交易对={}, 方向={:?}", 
                 signal.strategy, signal.symbol, signal.side);
             
             // 克隆需要的数据用于新任务
@@ -42,11 +44,11 @@ impl SignalManager {
             
             // 启动新的任务处理信号
             let handle = tokio::spawn(async move {
-                println!("🚀 开始处理信号: 策略={:?}", strategy);
+                tracing::info!("🚀 开始处理信号: 策略={:?}", strategy);
                 let result = Self::process_single_signal(signal, open_position, client).await;
                 match &result {
-                    Ok(_) => println!("✅ 信号处理成功: 策略={:?}", strategy),
-                    Err(e) => println!("❌ 信号处理失败: 策略={:?}, 错误: {}", strategy, e),
+                    Ok(_) => tracing::info!("✅ 信号处理成功: 策略={:?}", strategy),
+                    Err(e) => tracing::error!("❌ 信号处理失败: 策略={:?}, 错误: {}", strategy, e),
                 }
                 result
             });
@@ -55,16 +57,16 @@ impl SignalManager {
         }
         
         // 等待所有任务完成
-        println!("⏳ 等待所有信号处理任务完成...");
+        tracing::info!("⏳ 等待所有信号处理任务完成...");
         for (i, handle) in handles.into_iter().enumerate() {
             match handle.await {
-                Ok(Ok(())) => println!("✅ 任务 {} 完成", i),
-                Ok(Err(e)) => println!("❌ 任务 {} 失败: {}", i, e),
-                Err(e) => println!("❌ 任务 {} 异常: {}", i, e),
+                Ok(Ok(())) => tracing::info!("✅ 任务 {} 完成", i),
+                Ok(Err(e)) => tracing::error!("❌ 任务 {} 失败: {}", i, e),
+                Err(e) => tracing::error!("❌ 任务 {} 异常: {}", i, e),
             }
         }
         
-        println!("🎉 所有信号处理完成");
+        tracing::info!("🎉 所有信号处理完成");
         Ok(())
     }
 
@@ -84,23 +86,23 @@ impl SignalManager {
                 if market_signal.is_closed {
                     // 平仓信号：设置仓位为 0
                     positions.insert(strategy, 0.0);
-                    println!("📤 处理平仓信号: 策略 {:?}, 设置仓位为 0", strategy);
+                    tracing::info!("📤 处理平仓信号: 策略 {:?}, 设置仓位为 0", strategy);
                 } else {
                     // 开仓信号：设置仓位
                     positions.insert(strategy, signal.quantity);
-                    println!("📤 处理开仓信号: 策略 {:?}, 设置仓位为 {}", strategy, signal.quantity);
+                    tracing::info!("📤 处理开仓信号: 策略 {:?}, 设置仓位为 {}", strategy, signal.quantity);
                 }
             } else {
                 // 其他类型信号：设置仓位
                 positions.insert(strategy, signal.quantity);
-                println!("📤 处理其他信号: 策略 {:?}, 设置仓位为 {}", strategy, signal.quantity);
+                tracing::info!("📤 处理其他信号: 策略 {:?}, 设置仓位为 {}", strategy, signal.quantity);
             }
         }
 
         // 2. 执行订单
         match client.signal_to_order(&signal).await {
             Ok(order_ids) => {
-                println!("✅ 订单执行成功: 策略 {:?}, 交易对: {}, 方向: {:?}, 数量: {}, 订单ID: {:?}", 
+                tracing::info!("✅ 订单执行成功: 策略 {:?}, 交易对: {}, 方向: {:?}, 数量: {}, 订单ID: {:?}", 
                          strategy, signal.symbol, signal.side, signal.quantity, order_ids);
                 Ok(())
             }
@@ -108,9 +110,9 @@ impl SignalManager {
                 // 订单执行失败，回滚仓位
                 let mut positions = open_position.write().await;
                 positions.remove(&strategy);
-                println!("❌ 订单执行失败，移除仓位: 策略 {:?}", strategy);
+                tracing::error!("❌ 订单执行失败，移除仓位: 策略 {:?}", strategy);
                 
-                eprintln!("❌ 订单执行失败: {}", e);
+                tracing::error!("❌ 订单执行失败: {}", e);
                 Err(anyhow::anyhow!("Failed to place orders: {}", e))
             }
         }

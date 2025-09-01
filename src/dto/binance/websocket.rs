@@ -8,7 +8,7 @@ use crate::common::ts::IsClosed;
 use crate::common::ts::BookTickerData as BookTickerDataTrait;
 use crate::common::ts::TransactionTime;
 use crate::common::ts::PushTime;
-use crate::common::ts::Symbol;
+use crate::common::ts::{Symbol,SymbolEnum};
 /// 标记价格数据 - 使用 serde_with 自动转换字符串到数值
 #[serde_as]
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -192,9 +192,8 @@ impl Symbol for KlineData {
     }
 }
 
-impl KlineData {
-    /// 获取交易符号的引用
-    pub fn trading_symbol(&self) -> &TradingSymbol {
+impl SymbolEnum for KlineData {
+    fn symbol_enum(&self) -> &TradingSymbol {
         &self.symbol
     }
 }
@@ -509,8 +508,8 @@ mod tests {
         assert_eq!(kline_data.symbol(), "BTCUSDT");
         assert_eq!(kline_data.is_closed(), true);
         
-        // 测试 trading_symbol 方法
-        let trading_symbol = kline_data.trading_symbol();
+        // 测试 symbol_enum 方法
+        let trading_symbol = kline_data.symbol_enum();
         assert_eq!(trading_symbol.as_str(), "BTCUSDT");
         assert!(trading_symbol.is_predefined());
     }

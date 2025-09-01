@@ -21,6 +21,8 @@ pub enum TradingSymbol {
     LINKUSDT,
     LTCUSDT,
     UNIUSDT,
+    PEPEUSDT,
+    NEIROUSDT,
     
     // 自定义符号 - 对于不常见的交易对
     Custom(String),
@@ -44,6 +46,8 @@ impl TradingSymbol {
             TradingSymbol::LINKUSDT => "LINKUSDT",
             TradingSymbol::LTCUSDT => "LTCUSDT",
             TradingSymbol::UNIUSDT => "UNIUSDT",
+            TradingSymbol::PEPEUSDT => "1000PEPEUSDT",
+            TradingSymbol::NEIROUSDT=>"NEIROUSDT",
             TradingSymbol::Custom(s) => s.as_str(),
         }
     }
@@ -70,6 +74,8 @@ impl TradingSymbol {
             "LINKUSDT" => TradingSymbol::LINKUSDT,
             "LTCUSDT" => TradingSymbol::LTCUSDT,
             "UNIUSDT" => TradingSymbol::UNIUSDT,
+            "1000PEPEUSDT" => TradingSymbol::PEPEUSDT, // 币安实际符号映射
+            "NEIROUSDT" => TradingSymbol::NEIROUSDT,
             _ => TradingSymbol::Custom(s),
         }
     }

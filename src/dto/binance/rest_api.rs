@@ -3,7 +3,7 @@ use std::collections::HashMap;
 use anyhow::Result;
 use ta::{Close, High, Low, Not, Open, Qav, Tbbav, Tbqav, Volume};
 use std::str::FromStr;
-use crate::common::ts::{IsClosed, Symbol, MarketData, TransactionTime};
+use crate::common::ts::{IsClosed, Symbol, MarketData, TransactionTime,SymbolEnum};
 use crate::common::{Exchange, TradingSymbol};
 /// 订单类型枚举
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -182,6 +182,11 @@ impl MarketData for KlineData {
 impl TransactionTime for KlineData {
     fn transaction_time(&self) -> i64 {
         self.close_time
+    }
+}
+impl SymbolEnum for KlineData {
+    fn symbol_enum(&self) -> &TradingSymbol {
+        &self.symbol
     }
 }
 

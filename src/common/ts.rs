@@ -87,5 +87,20 @@ pub trait PushTime {
     fn push_time(&self) -> i64;
 }
 pub trait SymbolEnum{
-    fn symbol_enum(&self) -> TradingSymbol;
+    fn symbol_enum(&self) -> &TradingSymbol;
+}
+
+/// 符号设置器 trait - 允许从外部设置交易符号
+pub trait SymbolSetter {
+    /// 设置交易符号
+    fn set_symbol(&mut self, symbol: TradingSymbol);
+    
+    /// 链式设置交易符号（返回 self 以支持链式调用）
+    fn with_symbol(mut self, symbol: TradingSymbol) -> Self 
+    where 
+        Self: Sized 
+    {
+        self.set_symbol(symbol);
+        self
+    }
 }

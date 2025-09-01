@@ -1,10 +1,11 @@
 use ta::indicators::AverageTrueRange;
 use ta::indicators::NewBollinger;
-use ta::{Next, Close, High, Low, Open, Update};
+use ta::{Next, Close, High, Low, Open};
 use crate::common::enums::{Exchange, StrategyName};
-use crate::common::signal::{TradingSignal, Side, Signal, MarketSignal};
-use crate::common::ts::{Strategy, IsClosed};
-use crate::common::consts::*;
+use crate::common::signal::{TradingSignal, Side};
+use crate::common::ts::{Strategy, IsClosed, SymbolEnum, SymbolSetter};
+use crate::common::TradingSymbol;
+
 use crate::common::utils::get_timestamp_ms;
 use anyhow::Result;
 
@@ -21,6 +22,8 @@ pub struct BollingerStrategy {
     pub last_middle: f64,
     pub last_atr: f64,
     pub current_signal: u8,  // 0: 已平仓, 1: 多头, 2: 空头
+    /// 交易符号 - 支持动态设置
+    symbol: TradingSymbol,
 }
 
 impl BollingerStrategy {
@@ -37,6 +40,7 @@ impl BollingerStrategy {
             last_middle: 0.0,
             last_atr: 0.0,
             current_signal: 0,
+            symbol: TradingSymbol::default(), // 默认使用 BTCUSDT，后续可通过 set_symbol 修改
         })
     }
 
@@ -55,13 +59,16 @@ impl BollingerStrategy {
                 self.current_signal = 0;  // 重置信号状态
                 self.last_price = close_price;
                 
+                // 计算数量: 20/close_price 向下取整
+                let quantity = (20.0 / close_price).floor();
+                
                 // 创建平仓信号并标记为平仓操作
                 let signal = TradingSignal::new_close_signal(
                     1,
-                    TURBO_USDT_SYMBOL.to_string(),
+                    self.symbol.clone().into(), // 使用 Into trait，对预定义枚举更高效
                     position_to_close,  // 使用保存的位置
                     StrategyName::BOLLINGER,
-                    1000.0,
+                    quantity,
                     Exchange::Binance,
                     close_price,
                 );
@@ -80,12 +87,15 @@ impl BollingerStrategy {
                 
                 self.current_signal = 2;  // 设置为空头状态
                 self.last_price = close_price;
+                // 计算数量: 20/close_price 向下取整
+                let quantity = (20.0 / close_price).floor();
+                
                 return Some(TradingSignal::new_market_signal(
                     1,
-                    TURBO_USDT_SYMBOL.to_string(),
+                    self.symbol.clone().into(), // 使用 Into trait，对预定义枚举更高效
                     Side::Sell,
                     StrategyName::BOLLINGER,
-                    10000.0,
+                    quantity,
                     Exchange::Binance,
                     get_timestamp_ms() as u32,
                     None,
@@ -101,12 +111,15 @@ impl BollingerStrategy {
                 self.current_signal = 1;  // 设置为多头状态
                 self.last_price = close_price;
                 
+                // 计算数量: 20/close_price 向下取整
+                let quantity = (20.0 / close_price).floor();
+                
                 return Some(TradingSignal::new_market_signal(
                     1,
-                    TURBO_USDT_SYMBOL.to_string(),
+                    self.symbol.clone().into(), // 使用 Into trait，对预定义枚举更高效
                     Side::Buy,
                     StrategyName::BOLLINGER,
-                    10000.0,
+                    quantity,
                     Exchange::Binance,
                     get_timestamp_ms() as u32,
                     None,  // 止盈价格
@@ -183,5 +196,267 @@ where
 
     fn name(&self) -> String {
         "BOLLINGER".to_string()
+    }
+}
+
+// 实现 SymbolEnum trait
+impl SymbolEnum for BollingerStrategy {
+    fn symbol_enum(&self) -> &TradingSymbol {
+        &self.symbol
+    }
+}
+
+// 实现 SymbolSetter trait
+impl SymbolSetter for BollingerStrategy {
+    fn set_symbol(&mut self, symbol: TradingSymbol) {
+        self.symbol = symbol;
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::common::ts::Strategy;
+    use crate::common::signal::Side;
+    
+    // 模拟K线数据结构
+    #[derive(Clone)]
+    struct MockKlineData {
+        open: f64,
+        high: f64,
+        low: f64,
+        close: f64,
+        is_closed: bool,
+    }
+    
+    impl MockKlineData {
+        fn new(open: f64, high: f64, low: f64, close: f64, is_closed: bool) -> Self {
+            Self { open, high, low, close, is_closed }
+        }
+    }
+    
+    impl Open for MockKlineData {
+        fn open(&self) -> f64 { self.open }
+    }
+    
+    impl High for MockKlineData {
+        fn high(&self) -> f64 { self.high }
+    }
+    
+    impl Low for MockKlineData {
+        fn low(&self) -> f64 { self.low }
+    }
+    
+    impl Close for MockKlineData {
+        fn close(&self) -> f64 { self.close }
+    }
+    
+    impl IsClosed for MockKlineData {
+        fn is_closed(&self) -> bool { self.is_closed }
+    }
+    
+    // 创建测试用的K线数据 - 模拟NEIROUSDT的价格走势
+    fn create_test_klines() -> Vec<MockKlineData> {
+        vec![
+            // 初始化阶段 - 价格在0.000350-0.000360之间震荡
+            MockKlineData::new(0.000350, 0.000355, 0.000349, 0.000352, true),
+            MockKlineData::new(0.000352, 0.000358, 0.000351, 0.000356, true),
+            MockKlineData::new(0.000356, 0.000361, 0.000354, 0.000359, true),
+            MockKlineData::new(0.000359, 0.000362, 0.000357, 0.000360, true),
+            MockKlineData::new(0.000360, 0.000365, 0.000358, 0.000363, true),
+            MockKlineData::new(0.000363, 0.000368, 0.000361, 0.000365, true),
+            MockKlineData::new(0.000365, 0.000370, 0.000363, 0.000367, true),
+            MockKlineData::new(0.000367, 0.000372, 0.000365, 0.000369, true),
+            MockKlineData::new(0.000369, 0.000374, 0.000367, 0.000371, true),
+            MockKlineData::new(0.000371, 0.000376, 0.000369, 0.000373, true),
+            MockKlineData::new(0.000373, 0.000378, 0.000371, 0.000375, true),
+            MockKlineData::new(0.000375, 0.000380, 0.000373, 0.000377, true),
+            MockKlineData::new(0.000377, 0.000382, 0.000375, 0.000379, true),
+            MockKlineData::new(0.000379, 0.000384, 0.000377, 0.000381, true),
+            MockKlineData::new(0.000381, 0.000386, 0.000379, 0.000383, true),
+            MockKlineData::new(0.000383, 0.000388, 0.000381, 0.000385, true),
+            MockKlineData::new(0.000385, 0.000390, 0.000383, 0.000387, true),
+            MockKlineData::new(0.000387, 0.000392, 0.000385, 0.000389, true),
+            MockKlineData::new(0.000389, 0.000394, 0.000387, 0.000391, true),
+            MockKlineData::new(0.000391, 0.000396, 0.000389, 0.000393, true),
+            
+            // 触发信号的K线 - 价格突破上轨
+            MockKlineData::new(0.000393, 0.000420, 0.000391, 0.000418, true), // 突破上轨，应该生成卖出信号
+            
+            // 后续K线 - 价格回调
+            MockKlineData::new(0.000418, 0.000420, 0.000400, 0.000405, true),
+            MockKlineData::new(0.000405, 0.000410, 0.000395, 0.000398, true),
+            MockKlineData::new(0.000398, 0.000403, 0.000390, 0.000395, true), // 价格回到中轨附近，应该生成平仓信号
+        ]
+    }
+    
+    #[test]
+    fn test_bollinger_strategy_initialization() {
+        let mut strategy = BollingerStrategy::new(20, 2.0).unwrap();
+        strategy.set_symbol(TradingSymbol::NEIROUSDT);
+        
+        assert_eq!(strategy.period, 20);
+        assert_eq!(strategy.current_signal, 0);
+        assert!(!strategy.finish_init);
+        assert_eq!(strategy.symbol, TradingSymbol::NEIROUSDT);
+    }
+    
+    #[test]
+    fn test_bollinger_strategy_initialization_phase() {
+        let mut strategy = BollingerStrategy::new(20, 2.0).unwrap();
+        strategy.set_symbol(TradingSymbol::NEIROUSDT);
+        
+        let test_klines = create_test_klines();
+        
+        // 测试初始化阶段 - 前20根K线不应该生成信号
+        for (i, kline) in test_klines.iter().take(20).enumerate() {
+            let signal = strategy.on_kline_update(kline);
+            assert!(signal.is_none(), "初始化阶段第{}根K线不应该生成信号", i + 1);
+        }
+        
+        // 第20根K线后应该完成初始化
+        assert!(strategy.finish_init, "第20根K线后应该完成初始化");
+    }
+    
+    #[test]
+    fn test_bollinger_strategy_sell_signal_generation() {
+        let mut strategy = BollingerStrategy::new(20, 2.0).unwrap();
+        strategy.set_symbol(TradingSymbol::NEIROUSDT);
+        
+        let test_klines = create_test_klines();
+        
+        // 初始化策略
+        for kline in test_klines.iter().take(20) {
+            strategy.on_kline_update(kline);
+        }
+        
+        // 测试第21根K线 - 应该生成卖出信号（突破上轨）
+        let signal = strategy.on_kline_update(&test_klines[20]);
+        
+        assert!(signal.is_some(), "价格突破上轨应该生成信号");
+        let signal = signal.unwrap();
+        assert_eq!(signal.side, Side::Sell, "突破上轨应该生成卖出信号");
+        assert_eq!(signal.symbol, "NEIROUSDT", "信号应该包含正确的交易对");
+        assert!(signal.quantity > 0.0, "信号应该包含正确的数量");
+        assert_eq!(strategy.current_signal, 2, "策略状态应该更新为空头");
+        
+        println!("生成卖出信号: {:?}", signal);
+        println!("布林带值 - 上轨: {:.6}, 中轨: {:.6}, 下轨: {:.6}", 
+            strategy.last_upper, strategy.last_middle, strategy.last_lower);
+    }
+    
+    #[test]
+    fn test_bollinger_strategy_close_signal_generation() {
+        let mut strategy = BollingerStrategy::new(20, 2.0).unwrap();
+        strategy.set_symbol(TradingSymbol::NEIROUSDT);
+        
+        let test_klines = create_test_klines();
+        
+        // 初始化策略
+        for kline in test_klines.iter().take(20) {
+            strategy.on_kline_update(kline);
+        }
+        
+        // 生成开仓信号
+        let open_signal = strategy.on_kline_update(&test_klines[20]);
+        assert!(open_signal.is_some());
+        assert_eq!(strategy.current_signal, 2); // 空头状态
+        
+        // 处理中间的K线
+        strategy.on_kline_update(&test_klines[21]);
+        strategy.on_kline_update(&test_klines[22]);
+        
+        // 测试平仓信号 - 价格回到中轨
+        println!("当前持仓状态: {}", strategy.current_signal);
+        println!("当前价格: {:.6}, 上轨: {:.6}, 中轨: {:.6}, 下轨: {:.6}", 
+            strategy.last_price, strategy.last_upper, strategy.last_middle, strategy.last_lower);
+        println!("测试K线23价格: {:.6}", test_klines[23].close);
+        
+        let close_signal = strategy.on_kline_update(&test_klines[23]);
+        
+        println!("处理后持仓状态: {}", strategy.current_signal);
+        println!("处理后价格: {:.6}, 上轨: {:.6}, 中轨: {:.6}, 下轨: {:.6}", 
+            strategy.last_price, strategy.last_upper, strategy.last_middle, strategy.last_lower);
+        
+        assert!(close_signal.is_some(), "价格回到中轨应该生成平仓信号");
+        let signal = close_signal.unwrap();
+        assert_eq!(signal.symbol, "NEIROUSDT", "平仓信号应该包含正确的交易对");
+        assert!(signal.quantity > 0.0, "平仓信号应该包含正确的数量");
+        assert_eq!(strategy.current_signal, 0, "平仓后策略状态应该重置为无持仓");
+        
+        println!("生成平仓信号: {:?}", signal);
+    }
+    
+    #[test]
+    fn test_bollinger_strategy_buy_signal() {
+        let mut strategy = BollingerStrategy::new(20, 2.0).unwrap();
+        strategy.set_symbol(TradingSymbol::NEIROUSDT);
+        
+        // 创建触发下轨的测试数据
+        let mut test_klines = create_test_klines();
+        
+        // 修改最后一根K线，使其触及下轨
+        let last_idx = test_klines.len() - 1;
+        test_klines[last_idx] = MockKlineData::new(0.000350, 0.000355, 0.000300, 0.000310, true);
+        
+        // 初始化策略
+        for kline in test_klines.iter().take(20) {
+            strategy.on_kline_update(kline);
+        }
+        
+        // 测试买入信号
+        let signal = strategy.on_kline_update(&test_klines[last_idx]);
+        
+        if let Some(signal) = signal {
+            assert_eq!(signal.side, Side::Buy, "触及下轨应该生成买入信号");
+            assert_eq!(strategy.current_signal, 1, "策略状态应该更新为多头");
+            println!("生成买入信号: {:?}", signal);
+        }
+    }
+    
+    #[test]
+    fn test_bollinger_strategy_no_duplicate_signals() {
+        let mut strategy = BollingerStrategy::new(20, 2.0).unwrap();
+        strategy.set_symbol(TradingSymbol::NEIROUSDT);
+        
+        let test_klines = create_test_klines();
+        
+        // 初始化策略
+        for kline in test_klines.iter().take(20) {
+            strategy.on_kline_update(kline);
+        }
+        
+        // 第一次触发信号
+        let first_signal = strategy.on_kline_update(&test_klines[20]);
+        assert!(first_signal.is_some());
+        
+        // 再次使用相同的K线，不应该生成重复信号
+        let duplicate_signal = strategy.on_kline_update(&test_klines[20]);
+        assert!(duplicate_signal.is_none(), "相同条件下不应该生成重复信号");
+    }
+    
+    #[test]
+    fn test_bollinger_strategy_quantity_calculation() {
+        let mut strategy = BollingerStrategy::new(20, 2.0).unwrap();
+        strategy.set_symbol(TradingSymbol::NEIROUSDT);
+        
+        let test_klines = create_test_klines();
+        
+        // 初始化策略
+        for kline in test_klines.iter().take(20) {
+            strategy.on_kline_update(kline);
+        }
+        
+        // 生成信号并检查数量计算
+        let signal = strategy.on_kline_update(&test_klines[20]);
+        
+        if let Some(signal) = signal {
+            let expected_quantity = (20.0 / test_klines[20].close).floor();
+            assert_eq!(signal.quantity, expected_quantity, 
+                "数量计算应该是 20/价格 向下取整");
+            
+            println!("价格: {}, 计算数量: {}, 期望数量: {}", 
+                test_klines[20].close, signal.quantity, expected_quantity);
+        }
     }
 }
