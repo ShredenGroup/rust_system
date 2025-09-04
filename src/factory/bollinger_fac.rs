@@ -69,14 +69,23 @@ impl BollingerFactory {
         let (signal_tx, signal_rx) = mpsc::channel(1000);
         let positions = Arc::new(RwLock::new(HashMap::new()));
         
-        // 创建SignalManager
-        let mut signal_manager = SignalManager::new(
-            signal_rx,
-            positions.clone(),
+        // 创建API管理器
+        let (api_manager, mut api_rx) = create_api_manager(
             user_config.api_key.clone(),
             user_config.secret_key.clone(),
+        ).await?;
+        info!("✅ API管理器创建成功");
+
+        // 从API管理器获取共享的BinanceFuturesApi实例
+        let shared_api_client = api_manager.get_api_client();
+        
+        // 创建SignalManager，使用共享的API实例
+        let mut signal_manager = SignalManager::new_with_client(
+            signal_rx,
+            positions.clone(),
+            shared_api_client,
         );
-        info!("✅ 信号管理器创建成功");
+        info!("✅ 信号管理器创建成功（使用共享API实例）");
 
         // 启动信号处理任务
         let signal_manager_handle = tokio::spawn(async move {
@@ -85,13 +94,6 @@ impl BollingerFactory {
                 eprintln!("❌ 信号处理任务失败: {}", e);
             }
         });
-
-        // 创建API管理器
-        let (api_manager, mut api_rx) = create_api_manager(
-            user_config.api_key.clone(),
-            user_config.secret_key.clone(),
-        ).await?;
-        info!("✅ API管理器创建成功");
 
         // 创建WebSocket管理器
         let (ws_manager, mut ws_rx) = create_websocket_manager().await?;

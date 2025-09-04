@@ -3,6 +3,7 @@ use crate::common::signal::TradingSignal;
 use crate::common::TradingSymbol;
 use crate::strategy::macd::MacdStrategy;
 use crate::strategy::bollinger::BollingerStrategy;
+use crate::strategy::q1::Q1Strategy;
 use anyhow::Result;
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -51,6 +52,7 @@ pub struct SymbolStrategyManager<T: Close + High + Open + Low + Tbbav + Tbqav + 
 pub enum StrategyEnum {
     Macd(MacdStrategy),
     Bollinger(BollingerStrategy),
+    Q1(Q1Strategy),
     // 可以在这里添加更多策略类型
     // Rsi(RsiStrategy),
 }
@@ -65,6 +67,7 @@ where
         match self {
             StrategyEnum::Macd(strategy) => strategy.on_kline_update(input),
             StrategyEnum::Bollinger(strategy) => strategy.on_kline_update(input),
+            StrategyEnum::Q1(strategy) => strategy.on_kline_update(input),
         }
     }
 
@@ -72,6 +75,7 @@ where
         match self {
             StrategyEnum::Macd(_) => "MACD".to_string(),
             StrategyEnum::Bollinger(_) => "BOLLINGER".to_string(),
+            StrategyEnum::Q1(_) => "Q1".to_string(),
         }
     }
 }
@@ -81,6 +85,7 @@ impl StrategyEnum {
         match self {
             StrategyEnum::Macd(_) => "MACD".to_string(),
             StrategyEnum::Bollinger(_) => "BOLLINGER".to_string(),
+            StrategyEnum::Q1(_) => "Q1".to_string(),
         }
     }
 }
@@ -94,6 +99,9 @@ impl SymbolSetter for StrategyEnum {
                 // _strategy.set_symbol(symbol);
             },
             StrategyEnum::Bollinger(strategy) => {
+                strategy.set_symbol(symbol);
+            },
+            StrategyEnum::Q1(strategy) => {
                 strategy.set_symbol(symbol);
             },
         }
@@ -110,6 +118,7 @@ where
         match self {
             StrategyEnum::Macd(strategy) => strategy.on_kline_update(input.as_ref()),
             StrategyEnum::Bollinger(strategy) => strategy.on_kline_update(input.as_ref()),
+            StrategyEnum::Q1(strategy) => strategy.on_kline_update(input.as_ref()),
         }
     }
 
@@ -117,6 +126,7 @@ where
         match self {
             StrategyEnum::Macd(_) => "MACD".to_string(),
             StrategyEnum::Bollinger(_) => "BOLLINGER".to_string(),
+            StrategyEnum::Q1(_) => "Q1".to_string(),
         }
     }
 }

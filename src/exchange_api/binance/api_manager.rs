@@ -138,6 +138,11 @@ impl ApiManager {
         Ok(())
     }
 
+    /// 获取 API 客户端的克隆，用于共享实例
+    pub fn get_api_client(&self) -> BinanceFuturesApi {
+        self.api_client.clone()
+    }
+
     /// 停止所有任务
     pub async fn stop_all_tasks(&self) -> Result<()> {
         let mut tasks = self.tasks.lock().await;

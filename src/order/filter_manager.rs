@@ -13,6 +13,20 @@ pub struct SignalManager {
 }
 
 impl SignalManager {
+    /// 创建新的 SignalManager，接受已创建的 BinanceFuturesApi 实例
+    pub fn new_with_client(
+        signal_receiver: mpsc::Receiver<TradingSignal>,
+        open_position: Arc<RwLock<HashMap<StrategyName, f64>>>,
+        binance_client: BinanceFuturesApi,
+    ) -> Self {
+        Self {
+            open_position,
+            signal_receiver,
+            binance_client,
+        }
+    }
+
+    /// 创建新的 SignalManager（保持向后兼容）
     pub fn new(
         signal_receiver: mpsc::Receiver<TradingSignal>,
         open_position: Arc<RwLock<HashMap<StrategyName, f64>>>,
@@ -28,41 +42,23 @@ impl SignalManager {
     }
 
     pub async fn process_signals(&mut self) -> Result<()> {
-        // 使用多个任务并发处理信号
-        let mut handles = Vec::new();
-        
         tracing::info!("🚀 SignalManager开始等待信号...");
         
         while let Some(signal) = self.signal_receiver.recv().await {
             tracing::info!("📥 接收到信号: 策略={:?}, 交易对={}, 方向={:?}", 
                 signal.strategy, signal.symbol, signal.side);
             
-            // 克隆需要的数据用于新任务
-            let open_position = self.open_position.clone();
-            let client = self.binance_client.clone();
-            let strategy = signal.strategy; // 提取策略名称
+            // 直接处理信号，使用借用的 client
+            let strategy = signal.strategy;
+            let result = self.process_single_signal(signal).await;
+            match &result {
+                Ok(_) => tracing::info!("✅ 信号处理成功: 策略={:?}", strategy),
+                Err(e) => tracing::error!("❌ 信号处理失败: 策略={:?}, 错误: {}", strategy, e),
+            }
             
-            // 启动新的任务处理信号
-            let handle = tokio::spawn(async move {
-                tracing::info!("🚀 开始处理信号: 策略={:?}", strategy);
-                let result = Self::process_single_signal(signal, open_position, client).await;
-                match &result {
-                    Ok(_) => tracing::info!("✅ 信号处理成功: 策略={:?}", strategy),
-                    Err(e) => tracing::error!("❌ 信号处理失败: 策略={:?}, 错误: {}", strategy, e),
-                }
-                result
-            });
-            
-            handles.push(handle);
-        }
-        
-        // 等待所有任务完成
-        tracing::info!("⏳ 等待所有信号处理任务完成...");
-        for (i, handle) in handles.into_iter().enumerate() {
-            match handle.await {
-                Ok(Ok(())) => tracing::info!("✅ 任务 {} 完成", i),
-                Ok(Err(e)) => tracing::error!("❌ 任务 {} 失败: {}", i, e),
-                Err(e) => tracing::error!("❌ 任务 {} 异常: {}", i, e),
+            // 如果处理失败，可以选择是否继续处理下一个信号
+            if result.is_err() {
+                tracing::warn!("⚠️ 信号处理失败，继续处理下一个信号");
             }
         }
         
@@ -70,16 +66,12 @@ impl SignalManager {
         Ok(())
     }
 
-    async fn process_single_signal(
-        signal: TradingSignal,
-        open_position: Arc<RwLock<HashMap<StrategyName, f64>>>,
-        client: BinanceFuturesApi,
-    ) -> Result<()> {
+    async fn process_single_signal(&self, signal: TradingSignal) -> Result<()> {
         let strategy = signal.strategy;
 
         // 1. 直接更新仓位（不再检查是否已有仓位）
         {
-            let mut positions = open_position.write().await;
+            let mut positions = self.open_position.write().await;
             
             // 检查信号类型
             if let crate::common::signal::Signal::Market(market_signal) = &signal.signal {
@@ -99,8 +91,8 @@ impl SignalManager {
             }
         }
 
-        // 2. 执行订单
-        match client.signal_to_order(&signal).await {
+        // 2. 执行订单 - 使用借用的 client
+        match self.binance_client.signal_to_order(&signal).await {
             Ok(order_ids) => {
                 tracing::info!("✅ 订单执行成功: 策略 {:?}, 交易对: {}, 方向: {:?}, 数量: {}, 订单ID: {:?}", 
                          strategy, signal.symbol, signal.side, signal.quantity, order_ids);
@@ -108,7 +100,7 @@ impl SignalManager {
             }
             Err(e) => {
                 // 订单执行失败，回滚仓位
-                let mut positions = open_position.write().await;
+                let mut positions = self.open_position.write().await;
                 positions.remove(&strategy);
                 tracing::error!("❌ 订单执行失败，移除仓位: 策略 {:?}", strategy);
                 
@@ -126,18 +118,20 @@ mod tests {
     use crate::common::config::user_config::load_binance_user_config;
     
     #[tokio::test]
-    async fn test_concurrent_signal_processing() {
+    async fn test_sequential_signal_processing() {
         // 加载用户配置
         let user_config = load_binance_user_config().expect("Failed to load user config");
         
         let (signal_tx, signal_rx) = mpsc::channel(100);
         let positions = Arc::new(RwLock::new(HashMap::new()));
         
-        let mut manager = SignalManager::new(
+        // 创建共享的API客户端
+        let shared_api_client = BinanceFuturesApi::new(user_config.api_key, user_config.secret_key);
+        
+        let mut manager = SignalManager::new_with_client(
             signal_rx, 
             positions.clone(),
-            user_config.api_key,
-            user_config.secret_key,
+            shared_api_client,
         );
 
         // 创建多个测试信号
@@ -152,13 +146,13 @@ mod tests {
             ),
         ];
 
-        // 并发发送信号
+        // 顺序发送信号
         for signal in test_signals {
-            let signal_tx = signal_tx.clone();
-            tokio::spawn(async move {
-                signal_tx.send(signal).await.unwrap();
-            });
+            signal_tx.send(signal).await.unwrap();
         }
+        
+        // 关闭发送端
+        drop(signal_tx);
 
         // 运行信号处理
         manager.process_signals().await.unwrap();
@@ -172,11 +166,13 @@ mod tests {
         let (signal_tx, signal_rx) = mpsc::channel(100);
         let positions = Arc::new(RwLock::new(HashMap::new()));
         
-        let mut manager = SignalManager::new(
+        // 创建共享的API客户端
+        let shared_api_client = BinanceFuturesApi::new(user_config.api_key.clone(), user_config.secret_key.clone());
+        
+        let mut manager = SignalManager::new_with_client(
             signal_rx, 
             positions.clone(),
-            user_config.api_key.clone(),
-            user_config.secret_key.clone(),
+            shared_api_client,
         );
 
         // 创建测试信号：只有市价单，无止损止盈
@@ -242,11 +238,13 @@ mod tests {
         let (signal_tx, signal_rx) = mpsc::channel(100);
         let positions = Arc::new(RwLock::new(HashMap::new()));
         
-        let mut manager = SignalManager::new(
+        // 创建共享的API客户端
+        let shared_api_client = BinanceFuturesApi::new(user_config.api_key.clone(), user_config.secret_key.clone());
+        
+        let mut manager = SignalManager::new_with_client(
             signal_rx, 
             positions.clone(),
-            user_config.api_key.clone(),
-            user_config.secret_key.clone(),
+            shared_api_client,
         );
 
         // 创建测试信号：市价单 + 止损单
@@ -313,11 +311,13 @@ mod tests {
         let (signal_tx, signal_rx) = mpsc::channel(100);
         let positions = Arc::new(RwLock::new(HashMap::new()));
         
-        let mut manager = SignalManager::new(
+        // 创建共享的API客户端
+        let shared_api_client = BinanceFuturesApi::new(user_config.api_key.clone(), user_config.secret_key.clone());
+        
+        let mut manager = SignalManager::new_with_client(
             signal_rx, 
             positions.clone(),
-            user_config.api_key.clone(),
-            user_config.secret_key.clone(),
+            shared_api_client,
         );
 
         // 先设置一个仓位
@@ -385,11 +385,13 @@ mod tests {
         let (signal_tx, signal_rx) = mpsc::channel(100);
         let positions = Arc::new(RwLock::new(HashMap::new()));
         
-        let mut manager = SignalManager::new(
+        // 创建共享的API客户端
+        let shared_api_client = BinanceFuturesApi::new(user_config.api_key.clone(), user_config.secret_key.clone());
+        
+        let mut manager = SignalManager::new_with_client(
             signal_rx, 
             positions.clone(),
-            user_config.api_key.clone(),
-            user_config.secret_key.clone(),
+            shared_api_client,
         );
 
         // 先设置一个仓位（模拟已有持仓）
@@ -460,11 +462,13 @@ mod tests {
         let (signal_tx, signal_rx) = mpsc::channel(100);
         let positions = Arc::new(RwLock::new(HashMap::new()));
         
-        let mut manager = SignalManager::new(
+        // 创建共享的API客户端
+        let shared_api_client = BinanceFuturesApi::new(user_config.api_key.clone(), user_config.secret_key.clone());
+        
+        let mut manager = SignalManager::new_with_client(
             signal_rx, 
             positions.clone(),
-            user_config.api_key.clone(),
-            user_config.secret_key.clone(),
+            shared_api_client,
         );
 
         // 不设置初始仓位（模拟没有持仓的情况）
@@ -481,7 +485,7 @@ mod tests {
         );
 
         println!("🧪 开始测试 process_signals 无持仓平仓信号功能...");
-        println!("�� 测试信号详情:");
+        println!("📊 测试信号详情:");
         println!("   交易对: {}", close_signal.symbol);
         println!("   方向: {:?}", close_signal.side);
         println!("   数量: {}", close_signal.quantity);
