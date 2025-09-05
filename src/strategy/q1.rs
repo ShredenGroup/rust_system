@@ -106,12 +106,15 @@ impl Q1Strategy {
                 self.current_signal = 0;
                 self.last_price = close_price;
                 
+                // 计算数量: 20/close_price 向下取整，最小0.001
+                let quantity = (20.0 / close_price).floor().max(0.001);
+                
                 return Some(TradingSignal::new_close_signal(
                     1,
                     self.symbol.clone().into(),
                     position_to_close,
                     StrategyName::TURTLE,
-                    1000.0,
+                    quantity,
                     Exchange::Binance,
                     close_price,
                 ));
@@ -130,12 +133,15 @@ impl Q1Strategy {
                 
                 self.current_signal = 1;
                 self.last_price = close_price;
+                // 计算数量: 20/close_price 向下取整，最小0.001
+                let quantity = (20.0 / close_price).floor().max(0.001);
+                
                 return Some(TradingSignal::new_market_signal(
                     1,
                     self.symbol.clone().into(),
                     Side::Buy,
                     StrategyName::TURTLE,
-                    10000.0,
+                    quantity,
                     Exchange::Binance,
                     get_timestamp_ms() as u32,
                     None,
@@ -153,12 +159,15 @@ impl Q1Strategy {
                 
                 self.current_signal = 2;
                 self.last_price = close_price;
+                // 计算数量: 20/close_price 向下取整，最小0.001
+                let quantity = (20.0 / close_price).floor().max(0.001);
+                
                 return Some(TradingSignal::new_market_signal(
                     1,
                     self.symbol.clone().into(),
                     Side::Sell,
                     StrategyName::TURTLE,
-                    10000.0,
+                    quantity,
                     Exchange::Binance,
                     get_timestamp_ms() as u32,
                     None,
@@ -313,7 +322,7 @@ mod tests {
     fn create_test_klines() -> Vec<MockKlineData> {
         // 创建一个上升趋势的数据序列，每个数据点略高于前一个
         let mut klines = Vec::with_capacity(240);
-        let mut base_price = 1000.0;
+        let base_price = 1000.0;
         
         for i in 0..240 {
             let trend = 0.1; // 每个周期的趋势
