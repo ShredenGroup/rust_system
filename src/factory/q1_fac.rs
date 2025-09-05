@@ -26,97 +26,7 @@ use std::path::Path;
 use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::{RwLock, mpsc};
-use ta::{Close, High, Low, Open, Tbbav, Tbqav};
-use crate::common::ts::{IsClosed, Symbol, SymbolEnum};
-
-/// 定义一个统一的数据类型，可以包含不同来源的KlineData
-#[derive(Debug, Clone)]
-pub enum UnifiedKlineData {
-    WebSocket(crate::dto::binance::websocket::KlineData),
-    Api(crate::dto::binance::rest_api::KlineData),
-}
-
-// 为统一类型实现必要的traits
-impl Close for UnifiedKlineData {
-    fn close(&self) -> f64 {
-        match self {
-            UnifiedKlineData::WebSocket(data) => data.close(),
-            UnifiedKlineData::Api(data) => data.close(),
-        }
-    }
-}
-
-impl High for UnifiedKlineData {
-    fn high(&self) -> f64 {
-        match self {
-            UnifiedKlineData::WebSocket(data) => data.high(),
-            UnifiedKlineData::Api(data) => data.high(),
-        }
-    }
-}
-
-impl Low for UnifiedKlineData {
-    fn low(&self) -> f64 {
-        match self {
-            UnifiedKlineData::WebSocket(data) => data.low(),
-            UnifiedKlineData::Api(data) => data.low(),
-        }
-    }
-}
-
-impl Open for UnifiedKlineData {
-    fn open(&self) -> f64 {
-        match self {
-            UnifiedKlineData::WebSocket(data) => data.open(),
-            UnifiedKlineData::Api(data) => data.open(),
-        }
-    }
-}
-
-impl Tbbav for UnifiedKlineData {
-    fn tbbav(&self) -> Option<f64> {
-        match self {
-            UnifiedKlineData::WebSocket(data) => data.tbbav(),
-            UnifiedKlineData::Api(data) => data.tbbav(),
-        }
-    }
-}
-
-impl Tbqav for UnifiedKlineData {
-    fn tbqav(&self) -> Option<f64> {
-        match self {
-            UnifiedKlineData::WebSocket(data) => data.tbqav(),
-            UnifiedKlineData::Api(data) => data.tbqav(),
-        }
-    }
-}
-
-impl IsClosed for UnifiedKlineData {
-    fn is_closed(&self) -> bool {
-        match self {
-            UnifiedKlineData::WebSocket(data) => data.is_closed(),
-            UnifiedKlineData::Api(data) => data.is_closed(),
-        }
-    }
-}
-
-impl Symbol for UnifiedKlineData {
-    fn symbol(&self) -> &str {
-        match self {
-            UnifiedKlineData::WebSocket(data) => data.symbol(),
-            UnifiedKlineData::Api(data) => data.symbol(),
-        }
-    }
-}
-
-impl SymbolEnum for UnifiedKlineData {
-    fn symbol_enum(&self) -> &TradingSymbol {
-        match self {
-            UnifiedKlineData::WebSocket(data) => data.symbol_enum(),
-            UnifiedKlineData::Api(data) => &data.symbol,
-        }
-    }
-}
+use crate::dto::unified::UnifiedKlineData;
 
 /// Q1策略工厂
 pub struct Q1Factory;
@@ -160,6 +70,8 @@ impl Q1Factory {
             TradingSymbol::ETHUSDT,   // 以太坊
             TradingSymbol::PEPEUSDT,  // 映射到 "1000PEPEUSDT"
             TradingSymbol::NEIROUSDT,
+            TradingSymbol::ONDOUSDT,  // ONDO
+            TradingSymbol::AAVEUSDT,  // AAVE
         ];
         
         info!("📊 交易币种列表:");
@@ -239,6 +151,20 @@ impl Q1Factory {
                     20,     // ATR周期保持不变
                     2.8,    // 中等ATR倍数
                 ),
+                TradingSymbol::ONDOUSDT => (
+                    30,     // 较短的突破周期，因为波动较大
+                    240,    // EMA周期保持不变
+                    8,      // 较短的止盈周期，快速获利
+                    20,     // ATR周期保持不变
+                    3.5,    // 较大的ATR倍数，因为波动较大
+                ),
+                TradingSymbol::AAVEUSDT => (
+                    32,     // 中短突破周期
+                    240,    // EMA周期保持不变
+                    9,      // 中短止盈周期
+                    20,     // ATR周期保持不变
+                    3.2,    // 较大的ATR倍数
+                ),
                 _ => (
                     35,     // 默认突破周期
                     240,    // 默认EMA周期
@@ -283,7 +209,7 @@ impl Q1Factory {
             info!("   📈 获取 {} 历史数据", symbol.as_str());
             api_manager.get_history_klines(
                 symbol.as_str().to_string(),
-                "1m".to_string(),
+                "1h".to_string(),
                 None,
                 None,
                 Some("241".to_string()),  // 获取足够的K线用于初始化（240 EMA需要）
@@ -323,7 +249,7 @@ impl Q1Factory {
         let mut ws_configs = Vec::new();
         for symbol in &trading_symbols {
             let symbol_str = symbol.as_str().to_lowercase();
-            let interval = "1m";
+            let interval = "1h";
             
             let kline_config = KlineConfig::new(
                 &symbol_str,
