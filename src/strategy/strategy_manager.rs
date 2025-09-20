@@ -1,6 +1,5 @@
 use crate::common::ts::{Strategy, IsClosed, Symbol, SymbolEnum, SymbolSetter};
-use crate::common::signal::TradingSignal;
-use crate::common::TradingSymbol;
+use crate::models::{TradingSignal, TradingSymbol};
 use crate::strategy::macd::MacdStrategy;
 use crate::strategy::bollinger::BollingerStrategy;
 use crate::strategy::q1::Q1Strategy;

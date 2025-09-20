@@ -1,6 +1,6 @@
 use ta::{Close, High, Low, Open, Tbbav, Tbqav};
 use crate::common::ts::{IsClosed, Symbol, SymbolEnum};
-use crate::common::TradingSymbol;
+use crate::models::TradingSymbol;
 
 /// 定义一个统一的数据类型，可以包含不同来源的KlineData
 #[derive(Debug, Clone)]

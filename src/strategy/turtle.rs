@@ -1,7 +1,7 @@
 use ta::indicators::{Maximum, Minimum, AverageTrueRange};
-use ta::{Next, Close, High, Low, Open, Update};
+use ta::{Next, Close, High, Low, Open};
 use crate::common::enums::{Exchange, StrategyName};
-use crate::common::signal::{TradingSignal, Side, Signal, MarketSignal};
+use crate::models::{TradingSignal, Side};
 use crate::common::ts::{Strategy, IsClosed};
 use crate::common::consts::*;
 use crate::common::utils::get_timestamp_ms;

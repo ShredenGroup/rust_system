@@ -72,6 +72,7 @@ impl Q1Factory {
             TradingSymbol::NEIROUSDT,
             TradingSymbol::ONDOUSDT,  // ONDO
             TradingSymbol::AAVEUSDT,  // AAVE
+            TradingSymbol::SOLUSDT,   // Solana
         ];
         
         info!("📊 交易币种列表:");
@@ -164,6 +165,13 @@ impl Q1Factory {
                     9,      // 中短止盈周期
                     20,     // ATR周期保持不变
                     3.2,    // 较大的ATR倍数
+                ),
+                TradingSymbol::SOLUSDT => (
+                    40,     // 中等突破周期，SOL波动适中
+                    240,    // EMA周期保持不变
+                    10,     // 中等止盈周期
+                    20,     // ATR周期保持不变
+                    3.0,    // 中等ATR倍数，适合SOL的波动特性
                 ),
                 _ => (
                     35,     // 默认突破周期

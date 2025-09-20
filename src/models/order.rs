@@ -1,4 +1,5 @@
-use super::enums::{OrderStutus, StrategyName};
+use crate::common::enums::{OrderStutus, StrategyName};
+
 pub struct Order {
     pub symbol: String,
     pub amount: f64,

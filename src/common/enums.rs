@@ -5,7 +5,7 @@ pub enum Exchange {
     Okex,
 }
 
-#[derive(Debug, Clone, PartialEq,Copy,Hash,Eq)]
+#[derive(Debug, Clone, PartialEq, Copy, Hash, Eq)]
 #[repr(u8)]
 pub enum StrategyName {
     MACD = 0,
@@ -27,4 +27,10 @@ pub enum PositionSide {
     Long = 1,
     Short = 2,
     NoPosition = 0,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum PositionStatus {
+    Hold,
+    Finished,
 }

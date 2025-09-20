@@ -1,9 +1,8 @@
 use ta::indicators::{Maximum, Minimum, AverageTrueRange, ExponentialMovingAverage};
 use ta::{Next, Close, High, Low, Open};
 use crate::common::enums::{Exchange, StrategyName};
-use crate::common::signal::{TradingSignal, Side};
+use crate::models::{TradingSignal, Side, TradingSymbol};
 use crate::common::ts::{Strategy, IsClosed, SymbolEnum, SymbolSetter};
-use crate::common::TradingSymbol;
 use crate::common::utils::get_timestamp_ms;
 use anyhow::Result;
 
@@ -280,7 +279,6 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::common::signal::Side;
     
     // 模拟K线数据结构
     #[derive(Clone)]

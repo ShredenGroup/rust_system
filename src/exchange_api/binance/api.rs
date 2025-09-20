@@ -1,6 +1,6 @@
 use crate::common::consts::BINANCE_FUTURES_URL;
 use crate::common::utils::generate_hmac_signature;
-use crate::common::signal::{TradingSignal, Signal, MarketSignal, Side};
+use crate::models::{TradingSignal, Signal, MarketSignal, Side};
 use crate::dto::binance::rest_api::{
     OrderType, OrderSide, TimeInForce, KlineRequest, KlineResponse,
     OrderRequest, OrderResponse

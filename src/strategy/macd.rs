@@ -1,6 +1,6 @@
 use crate::common::ts::IsClosed;
 use crate::common::ts::Strategy;
-use crate::common::signal::{TradingSignal, Side, Signal, MarketSignal};
+use crate::models::{TradingSignal, Side};
 use crate::common::enums::{Exchange, StrategyName};
 use crate::common::utils::get_timestamp_ms;
 use anyhow::Result;

@@ -3,9 +3,9 @@ use crate::{
         config::ws_config::{KlineConfig, WebSocketBaseConfig},
         config::user_config::load_binance_user_config,
         ts::Strategy,
-        signal::Side,
         consts::TURBO_USDT_SYMBOL,
     },
+    models::Side,
     exchange_api::binance::{
         ws_manager::{create_websocket_manager, WebSocketMessage},
         api_manager::{create_api_manager, ApiMessage},

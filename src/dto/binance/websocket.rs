@@ -1,6 +1,6 @@
 use crate::common::Exchange;
 use crate::common::ts::MarketData;
-use crate::common::TradingSymbol;
+use crate::models::TradingSymbol;
 use serde::{Deserialize, Serialize};
 use serde_with::{DisplayFromStr, serde_as};
 use ta::{Close, High, Low, Not, Open, Qav, Tbbav, Tbqav, Volume};
