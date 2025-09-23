@@ -313,7 +313,7 @@ impl BinanceFuturesApi {
                 error_log!(warn, "⚠️ 取消开放订单失败: {}，继续执行平仓", error);
             }
             
-            // 平仓操作：使用硬编码数量 10000000，并设置 reduce_only
+            // 平仓操作：使用信号携带的数量，并设置 reduce_only
             let close_order_request = OrderRequest {
                 symbol: signal.symbol.clone(),
                 side: match signal.side {
@@ -321,7 +321,7 @@ impl BinanceFuturesApi {
                     Side::Sell => OrderSide::Sell, // 平仓卖出（平多仓）
                 },
                 order_type: OrderType::Market,
-                quantity: Some("10000000".to_string()), // 硬编码数量
+                quantity: Some(signal.quantity.to_string()),
                 reduce_only: Some("true".to_string()),   // 必须是减仓单
                 timestamp: Some(Self::get_timestamp()),
                 recv_window: Some(60000),
@@ -329,7 +329,7 @@ impl BinanceFuturesApi {
             };
             
             all_orders.push(close_order_request);
-            println!("准备下1个平仓订单: 数量 10000000, reduce_only=true");
+            println!("准备下1个平仓订单: 数量 {}, reduce_only=true", signal.quantity);
             
         } else {
             // 开仓操作：原有的逻辑

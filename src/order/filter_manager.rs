@@ -173,6 +173,7 @@ impl SignalManager {
     }
 
     async fn process_single_signal(&mut self, signal: TradingSignal) -> Result<()> {
+        let mut signal = signal; // may adjust quantity for close signals
         let strategy = signal.strategy;
 
         // 1. 检查信号类型并处理仓位
@@ -195,6 +196,9 @@ impl SignalManager {
                 );
                 return Ok(()); // 没有仓位，直接返回
             }
+
+            // 在发送到交易所前，将平仓信号数量设置为当前持仓数量
+            signal.quantity = current_position;
 
             // 清零内存仓位
             self.position_manager.set_position_by_signal(&signal, 0.0);

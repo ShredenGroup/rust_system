@@ -21,7 +21,6 @@ use anyhow::Result;
 
 use std::time::Instant;
 use tracing::{info, debug, error};
-use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::mpsc;
 use crate::dto::unified::UnifiedKlineData;
@@ -280,78 +279,38 @@ impl Q1Factory {
             }
         }
 
-        // 统计变量
+        // 简化的统计变量
         let mut message_count = 0;
-        let mut kline_count_by_symbol: HashMap<String, usize> = HashMap::new();
-        let signal_count = 0;
-        let mut total_latency = 0.0f64;
 
         // 处理实时数据
-        let start_time = Instant::now();
         info!("🎯 开始接收实时K线数据...");
         
         while let Some(message) = ws_rx.recv().await {
-            let ws_received_time = Instant::now();
             message_count += 1;
 
-            // 每100条消息打印一次统计
-            if message_count % 100 == 0 {
-                info!("📊 统计信息: 总消息数={}, 信号数量={}", message_count, signal_count);
-                for (symbol, count) in &kline_count_by_symbol {
-                    info!("   {} K线数量: {}", symbol, count);
-                }
-            }
+            // 统计信息已移除，减少日志冗余
 
             match message {
                 WebSocketMessage::Kline(kline_data) => {
-                    let symbol_str = kline_data.symbol.as_str();
-                    *kline_count_by_symbol.entry(symbol_str.to_string()).or_insert(0) += 1;
-                    
                     let kline_info = &kline_data.kline;
                     websocket_log!(debug, "📈 收到K线数据: {}, 价格={:.6}, 完成={}", 
-                        symbol_str, kline_info.close_price, kline_info.is_closed);
+                        kline_data.symbol.as_str(), kline_info.close_price, kline_info.is_closed);
 
                     // 发送数据到策略管理器
-                    let strategy_start_time = Instant::now();
                     let ws_kline_data = (*kline_data).clone();
                     let unified_data = UnifiedKlineData::WebSocket(ws_kline_data);
                     if let Err(e) = strategy_data_tx.send(Arc::new(unified_data)).await {
                         error!("❌ 发送数据到策略管理器失败: {}", e);
-                    } else {
-                        let strategy_latency = strategy_start_time.elapsed().as_secs_f64() * 1000.0;
-                        total_latency += strategy_latency;
-                        
-                        websocket_log!(debug, "📤 数据已发送到策略管理器, 延迟: {:.3}ms", strategy_latency);
                     }
-
-                    let total_processing_time = ws_received_time.elapsed().as_secs_f64() * 1000.0;
-                    websocket_log!(debug, "   总处理延迟: {:.3} ms", total_processing_time);
                 }
                 _ => {}
             }
 
-            // 每1000条消息打印性能统计
-            if message_count % 1000 == 0 {
-                let elapsed = start_time.elapsed().as_secs_f64();
-                let avg_latency = if message_count > 0 { total_latency / message_count as f64 } else { 0.0 };
-                
-                info!("📊 性能统计:");
-                info!("   处理消息数: {}, 信号生成数: {}", message_count, signal_count);
-                info!("   运行时间: {:.2}秒", elapsed);
-                info!("   消息处理率: {:.2}条/秒", message_count as f64 / elapsed);
-                info!("   平均延迟: {:.3}ms", avg_latency);
-                
-                for (symbol, count) in &kline_count_by_symbol {
-                    info!("   {} 处理速率: {:.2}条/秒", symbol, *count as f64 / elapsed);
-                }
-            }
+            // 性能统计已移除，减少日志冗余
         }
 
         info!("🏁 多币种Q1策略结束");
-        info!("最终统计: 总消息数={}, 信号数量={}", message_count, signal_count);
-        for (symbol, count) in &kline_count_by_symbol {
-            info!("   {} 最终K线数量: {}", symbol, count);
-        }
+        info!("最终统计: 总消息数={}", message_count);
 
         // 等待所有任务完成
         info!("⏳ 等待所有任务完成...");
