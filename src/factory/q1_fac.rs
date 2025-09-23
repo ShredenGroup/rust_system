@@ -217,7 +217,7 @@ impl Q1Factory {
             info!("   📈 获取 {} 历史数据", symbol.as_str());
             api_manager.get_history_klines(
                 symbol.as_str().to_string(),
-                "1h".to_string(),
+                "1m".to_string(),
                 None,
                 None,
                 Some("241".to_string()),  // 获取足够的K线用于初始化（240 EMA需要）
@@ -257,7 +257,7 @@ impl Q1Factory {
         let mut ws_configs = Vec::new();
         for symbol in &trading_symbols {
             let symbol_str = symbol.as_str().to_lowercase();
-            let interval = "1h";
+            let interval = "1m";
             
             let kline_config = KlineConfig::new(
                 &symbol_str,
