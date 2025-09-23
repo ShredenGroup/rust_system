@@ -245,7 +245,8 @@ pub struct OrderRequest {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct OrderResponse {
-    pub client_order_id: String,
+    #[serde(default)]
+    pub client_order_id: Option<String>,
     pub cum_qty: String,
     pub cum_quote: String,
     pub executed_qty: String,
