@@ -656,12 +656,16 @@ impl BinanceFuturesApi {
         if !status.is_success() {
             let error_text = response.text().await?;
             println!("❌ 批量下单API请求失败: HTTP状态: {}, 错误: {}", status, error_text);
+            // 记录到订单日志
+            order_log!(error, "❌ 批量下单失败: HTTP状态={}, 响应={}", status, error_text);
             return Err(anyhow::anyhow!("批量下单API请求失败: HTTP状态: {}, 错误: {}", status, error_text));
         }
 
         // 获取响应文本进行调试
         let response_text = response.text().await?;
         println!("📡 API响应: {}", response_text);
+        // 记录到订单日志
+        order_log!(info, "📡 批量下单响应: {}", response_text);
 
         // 解析响应 - 返回订单响应列表
         let order_responses: Vec<OrderResponse> = serde_json::from_str(&response_text)?;
