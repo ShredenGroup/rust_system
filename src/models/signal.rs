@@ -108,6 +108,16 @@ impl TradingSignal {
             timestamp: get_timestamp_ms(),
         }
     }
+    
+    /// 获取交易所
+    pub fn exchange(&self) -> Exchange {
+        self.exchange
+    }
+    
+    /// 获取时间戳
+    pub fn timestamp(&self) -> u64 {
+        self.timestamp
+    }
 }
 
 impl SignalTs for TradingSignal {

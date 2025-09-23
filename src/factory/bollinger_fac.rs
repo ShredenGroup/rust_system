@@ -11,7 +11,7 @@ use crate::{
         api_manager::{create_api_manager, ApiMessage},
     },
     strategy::bollinger::BollingerStrategy,
-    order::filter_manager::SignalManager,
+    order::filter_manager::{SignalManager, PositionManager},
 };
 use ta::Next;
 use anyhow::Result;
@@ -21,9 +21,7 @@ use tracing::{info, debug, error};
 use tracing_subscriber::EnvFilter;
 use std::fs;
 use std::path::Path;
-use std::collections::HashMap;
-use std::sync::Arc;
-use tokio::sync::{RwLock, mpsc};
+use tokio::sync::mpsc;
 
 /// 布林带策略工厂
 pub struct BollingerFactory;
@@ -67,7 +65,7 @@ impl BollingerFactory {
 
         // 创建信号处理通道
         let (signal_tx, signal_rx) = mpsc::channel(1000);
-        let positions = Arc::new(RwLock::new(HashMap::new()));
+        let position_manager = PositionManager::new(10000.0); // 初始余额
         
         // 创建API管理器
         let (api_manager, mut api_rx) = create_api_manager(
@@ -82,7 +80,7 @@ impl BollingerFactory {
         // 创建SignalManager，使用共享的API实例
         let mut signal_manager = SignalManager::new_with_client(
             signal_rx,
-            positions.clone(),
+            position_manager,
             shared_api_client,
         );
         info!("✅ 信号管理器创建成功（使用共享API实例）");

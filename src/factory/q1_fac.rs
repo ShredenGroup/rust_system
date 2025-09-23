@@ -12,7 +12,7 @@ use crate::{
         q1::Q1Strategy,
         strategy_manager::{StrategyManager, StrategyEnum, IdGenerator},
     },
-    order::filter_manager::SignalManager,
+    order::filter_manager::{SignalManager, PositionManager},
 };
 
 use tokio;
@@ -25,7 +25,7 @@ use std::fs;
 use std::path::Path;
 use std::collections::HashMap;
 use std::sync::Arc;
-use tokio::sync::{RwLock, mpsc};
+use tokio::sync::mpsc;
 use crate::dto::unified::UnifiedKlineData;
 
 /// Q1策略工厂
@@ -86,7 +86,7 @@ impl Q1Factory {
 
         // 创建信号处理通道
         let (signal_tx, signal_rx) = mpsc::channel(1000);
-        let positions = Arc::new(RwLock::new(HashMap::new()));
+        let position_manager = PositionManager::new(10000.0); // 初始余额
         
         // 创建API管理器
         let (api_manager, mut api_rx) = create_api_manager(
@@ -101,7 +101,7 @@ impl Q1Factory {
         // 创建SignalManager，使用共享的API实例
         let mut signal_manager = SignalManager::new_with_client(
             signal_rx,
-            positions.clone(),
+            position_manager,
             shared_api_client,
         );
         info!("✅ 信号管理器创建成功（使用共享API实例）");
