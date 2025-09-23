@@ -2,6 +2,7 @@ pub mod config;
 pub mod consts;
 pub mod enums;
 pub mod error;
+pub mod simple_logging;
 pub mod ts;
 pub mod utils;
 pub use enums::Exchange;

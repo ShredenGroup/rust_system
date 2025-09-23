@@ -10,7 +10,10 @@ use reqwest::Client;
 use serde_json;
 use std::collections::HashMap;
 use std::time::{SystemTime, UNIX_EPOCH};
-use crate::common::enums::{StrategyName, Exchange};
+use crate::common::enums::StrategyName;
+
+// 导入日志宏
+use crate::{order_log, error_log};
 
 /// 币安期货 API 客户端
 #[derive(Debug, Clone)]
@@ -300,14 +303,14 @@ impl BinanceFuturesApi {
         // 检查是否为平仓操作
         if market_signal.is_closed {
             // 平仓操作：先取消该交易对的所有开放订单
-            println!("🔄 平仓操作：先取消 {} 的所有开放订单", signal.symbol);
+            order_log!(info, "🔄 平仓操作：先取消 {} 的所有开放订单", signal.symbol);
             let cancel_result = self.cancel_all_open_orders(&signal.symbol, None).await;
             if cancel_result.is_ok() {
-                println!("✅ 成功取消 {} 的所有开放订单", signal.symbol);
+                order_log!(info, "✅ 成功取消 {} 的所有开放订单", signal.symbol);
             } else {
                 // 如果取消订单失败，记录警告但继续执行平仓
                 let error = cancel_result.unwrap_err();
-                println!("⚠️ 取消开放订单失败: {}，继续执行平仓", error);
+                error_log!(warn, "⚠️ 取消开放订单失败: {}，继续执行平仓", error);
             }
             
             // 平仓操作：使用硬编码数量 10000000，并设置 reduce_only

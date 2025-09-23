@@ -6,6 +6,9 @@ use std::collections::HashMap;
 use std::str::FromStr;
 use tokio::sync::mpsc;
 
+// 导入日志宏
+use crate::{signal_log, order_log, error_log};
+
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Copy)]
 pub struct PositionKey {
     exchange: Exchange,
@@ -145,8 +148,7 @@ impl SignalManager {
         tracing::info!("🚀 SignalManager开始等待信号...");
 
         while let Some(signal) = self.signal_receiver.recv().await {
-            tracing::info!(
-                "📥 接收到信号: 策略={:?}, 交易对={}, 方向={:?}",
+            signal_log!(info, "📥 接收到信号: 策略={:?}, 交易对={}, 方向={:?}",
                 signal.strategy,
                 signal.symbol,
                 signal.side
@@ -156,8 +158,8 @@ impl SignalManager {
             let strategy = signal.strategy;
             let result = self.process_single_signal(signal).await;
             match &result {
-                Ok(_) => tracing::info!("✅ 信号处理成功: 策略={:?}", strategy),
-                Err(e) => tracing::error!("❌ 信号处理失败: 策略={:?}, 错误: {}", strategy, e),
+                Ok(_) => signal_log!(info, "✅ 信号处理成功: 策略={:?}", strategy),
+                Err(e) => error_log!(error, "❌ 信号处理失败: 策略={:?}, 错误: {}", strategy, e),
             }
 
             // 如果处理失败，可以选择是否继续处理下一个信号
@@ -235,8 +237,7 @@ impl SignalManager {
         // 2. 执行订单 - 使用借用的 client
         match self.binance_client.signal_to_order(&signal).await {
             Ok(order_ids) => {
-                tracing::info!(
-                    "✅ 订单执行成功: 策略 {:?}, 交易对: {}, 方向: {:?}, 数量: {}, 订单ID: {:?}",
+                order_log!(info, "✅ 订单执行成功: 策略 {:?}, 交易对: {}, 方向: {:?}, 数量: {}, 订单ID: {:?}",
                     strategy,
                     signal.symbol,
                     signal.side,

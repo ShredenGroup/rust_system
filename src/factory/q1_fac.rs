@@ -2,6 +2,7 @@ use crate::{
     common::{
         config::ws_config::{KlineConfig, WebSocketBaseConfig},
         config::user_config::load_binance_user_config,
+        simple_logging::{SimpleLoggingManager, SimpleLoggingConfig},
         TradingSymbol,
     },
     exchange_api::binance::{
@@ -20,13 +21,13 @@ use anyhow::Result;
 
 use std::time::Instant;
 use tracing::{info, debug, error};
-use tracing_subscriber::EnvFilter;
-use std::fs;
-use std::path::Path;
 use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::mpsc;
 use crate::dto::unified::UnifiedKlineData;
+
+// 导入日志宏
+use crate::websocket_log;
 
 /// Q1策略工厂
 pub struct Q1Factory;
@@ -34,27 +35,15 @@ pub struct Q1Factory;
 impl Q1Factory {
     /// 设置日志系统
     pub fn setup_logging() -> Result<()> {
-        // 创建logs目录
-        let log_dir = "logs";
-        if !Path::new(log_dir).exists() {
-            fs::create_dir(log_dir)?;
-        }
-
-        // 配置日志过滤器
-        let filter = EnvFilter::try_from_default_env()
-            .unwrap_or_else(|_| EnvFilter::new("info,q1_factory=debug"));
-
-        // 配置文件输出
-        let file_appender = tracing_appender::rolling::daily(log_dir, "q1_factory.log");
-
-        // 初始化日志系统
-        tracing_subscriber::fmt()
-            .with_env_filter(filter)
-            .with_writer(file_appender)
-            .init();
-
+        let config = SimpleLoggingConfig {
+            log_dir: "logs".to_string(),
+            enable_console: true,
+        };
+        
+        let logging_manager = SimpleLoggingManager::new(config);
+        logging_manager.init()?;
+        
         info!("🚀 Q1策略工厂启动");
-        info!("📁 日志文件保存在: {}", log_dir);
         
         Ok(())
     }
@@ -319,7 +308,7 @@ impl Q1Factory {
                     *kline_count_by_symbol.entry(symbol_str.to_string()).or_insert(0) += 1;
                     
                     let kline_info = &kline_data.kline;
-                    debug!("📈 收到K线数据: {}, 价格={:.6}, 完成={}", 
+                    websocket_log!(debug, "📈 收到K线数据: {}, 价格={:.6}, 完成={}", 
                         symbol_str, kline_info.close_price, kline_info.is_closed);
 
                     // 发送数据到策略管理器
@@ -332,11 +321,11 @@ impl Q1Factory {
                         let strategy_latency = strategy_start_time.elapsed().as_secs_f64() * 1000.0;
                         total_latency += strategy_latency;
                         
-                        debug!("📤 数据已发送到策略管理器, 延迟: {:.3}ms", strategy_latency);
+                        websocket_log!(debug, "📤 数据已发送到策略管理器, 延迟: {:.3}ms", strategy_latency);
                     }
 
                     let total_processing_time = ws_received_time.elapsed().as_secs_f64() * 1000.0;
-                    debug!("   总处理延迟: {:.3} ms", total_processing_time);
+                    websocket_log!(debug, "   总处理延迟: {:.3} ms", total_processing_time);
                 }
                 _ => {}
             }
