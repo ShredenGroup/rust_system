@@ -28,6 +28,8 @@ pub struct Q1Strategy {
     pub current_signal: u8,
     // 缓存最新价格和指标值
     pub last_price: f64,
+    // 最近一次开仓时确定的止损价（多单: 价格-ATR*k，空单: 价格+ATR*k）
+    pub last_stop_price: Option<f64>,
     pub last_ema: f64,
     pub last_atr: f64,
     pub last_upper_break: f64,
@@ -62,6 +64,7 @@ impl Q1Strategy {
             finish_init: false,
             current_signal: 0,
             last_price: 0.0,
+            last_stop_price: None,
             last_ema: 0.0,
             last_atr: 0.0,
             last_upper_break: 0.0,
@@ -101,6 +104,17 @@ impl Q1Strategy {
             };
 
             if should_close {
+                // 风控：若价格已触发止损（多单<=止损；空单>=止损），则不发送平仓信号
+                if let Some(stop) = self.last_stop_price {
+                    let violated = match self.current_signal {
+                        1 => close_price <= stop, // 多单
+                        2 => close_price >= stop, // 空单
+                        _ => false,
+                    };
+                    if violated {
+                        return None;
+                    }
+                }
                 let position_to_close = self.current_signal;
                 self.current_signal = 0;
                 self.last_price = close_price;
@@ -132,6 +146,7 @@ impl Q1Strategy {
                 
                 self.current_signal = 1;
                 self.last_price = close_price;
+                self.last_stop_price = Some(stop_price);
                 // 计算数量: 20/close_price 向下取整，最小0.001
                 let quantity = (20.0 / close_price).floor().max(0.001);
                 
@@ -158,6 +173,7 @@ impl Q1Strategy {
                 
                 self.current_signal = 2;
                 self.last_price = close_price;
+                self.last_stop_price = Some(stop_price);
                 // 计算数量: 20/close_price 向下取整，最小0.001
                 let quantity = (20.0 / close_price).floor().max(0.001);
                 
