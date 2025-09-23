@@ -34,13 +34,17 @@ cd "$(dirname "$0")/.."
 # 创建logs目录（如果不存在）
 mkdir -p logs
 
-# 设置日志文件路径
-LOG_FILE="logs/${STRATEGY_NAME}_strategy_$(date +%Y%m%d_%H%M%S).log"
+# 设置PID文件路径
 PID_FILE="logs/${STRATEGY_NAME}_strategy.pid"
 
 echo "🚀 启动${STRATEGY_DISPLAY_NAME}策略程序..."
 echo "📁 当前工作目录: $(pwd)"
-echo "📁 日志文件: $LOG_FILE"
+echo "📁 日志目录: logs/"
+echo "📋 分类日志文件:"
+echo "   • main.log - 主要系统日志"
+echo "   • signals.log - 交易信号日志"
+echo "   • orders.log - 订单执行日志"
+echo "   • websocket.log - WebSocket数据流日志"
 echo "🆔 PID文件: $PID_FILE"
 
 # 检查是否已经在运行
@@ -56,13 +60,17 @@ if [ -f "$PID_FILE" ]; then
     fi
 fi
 
-# 在后台启动程序
-nohup cargo run -- $STRATEGY_NAME > "$LOG_FILE" 2>&1 &
+# 在后台启动程序（不需要重定向输出，因为程序内部已经处理日志）
+nohup cargo run -- $STRATEGY_NAME > /dev/null 2>&1 &
 
 # 保存PID
 echo $! > "$PID_FILE"
 
 echo "✅ 程序已启动 (PID: $(cat $PID_FILE))"
-echo "📊 实时日志查看: tail -f $LOG_FILE"
+echo "📊 实时日志查看命令:"
+echo "   • 主要日志: tail -f logs/main.log"
+echo "   • 信号日志: tail -f logs/signals.log"
+echo "   • 订单日志: tail -f logs/orders.log"
+echo "   • WebSocket日志: tail -f logs/websocket.log"
 echo "🛑 停止程序: ./scripts/stop_strategy.sh $STRATEGY_NAME"
 echo "📋 查看状态: ./scripts/status_strategy.sh $STRATEGY_NAME"

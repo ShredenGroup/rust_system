@@ -52,14 +52,22 @@ if ps -p $PID > /dev/null 2>&1; then
     
     # 显示最新的日志
     echo ""
-    echo "📋 最新日志 (最后10行):"
+    echo "📋 最新日志 (最后5行):"
     echo "------------------------------"
     if [ -d "logs" ]; then
-        LATEST_LOG=$(ls -t logs/${STRATEGY_NAME}_strategy_*.log 2>/dev/null | head -1)
-        if [ -n "$LATEST_LOG" ]; then
-            tail -10 "$LATEST_LOG"
-        else
-            echo "暂无日志文件"
+        if [ -f "logs/main.log" ]; then
+            echo "📄 主要日志:"
+            tail -5 logs/main.log
+        fi
+        if [ -f "logs/signals.log" ] && [ -s "logs/signals.log" ]; then
+            echo ""
+            echo "📄 信号日志:"
+            tail -5 logs/signals.log
+        fi
+        if [ -f "logs/orders.log" ] && [ -s "logs/orders.log" ]; then
+            echo ""
+            echo "📄 订单日志:"
+            tail -5 logs/orders.log
         fi
     fi
 else
@@ -69,9 +77,12 @@ else
 fi
 
 echo ""
-echo "📁 日志文件列表:"
+echo "📁 分类日志文件状态:"
 if [ -d "logs" ]; then
-    ls -la logs/${STRATEGY_NAME}_strategy_*.log 2>/dev/null | head -5
+    echo "📄 main.log: $(ls -lh logs/main.log 2>/dev/null | awk '{print $5}' || echo '不存在')"
+    echo "📄 signals.log: $(ls -lh logs/signals.log 2>/dev/null | awk '{print $5}' || echo '不存在')"
+    echo "📄 orders.log: $(ls -lh logs/orders.log 2>/dev/null | awk '{print $5}' || echo '不存在')"
+    echo "📄 websocket.log: $(ls -lh logs/websocket.log 2>/dev/null | awk '{print $5}' || echo '不存在')"
 else
     echo "logs目录不存在"
 fi
