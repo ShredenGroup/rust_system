@@ -3,7 +3,7 @@ use ta::{Next, Close, High, Low, Open};
 use crate::common::enums::{Exchange, StrategyName};
 use crate::models::{TradingSignal, Side, TradingSymbol};
 use crate::common::ts::{Strategy, IsClosed, SymbolEnum, SymbolSetter};
-use crate::common::utils::get_timestamp_ms;
+use crate::common::utils::{get_timestamp_ms, align_price_precision};
 use anyhow::Result;
 
 #[derive(Clone)]
@@ -142,7 +142,7 @@ impl Q1Strategy {
             // 3. 价格在240 EMA上方
             if high_price > max_break && self.prev_high < max_break && close_price > ema_value {
                 let stop_price = close_price - (self.atr_multiplier * atr_value); // ATR止损
-                let stop_price = (stop_price * 1000000.0).round() / 1000000.0;
+                let stop_price = align_price_precision(close_price, stop_price); // 与市场价格对齐精度
                 
                 self.current_signal = 1;
                 self.last_price = close_price;
@@ -169,7 +169,7 @@ impl Q1Strategy {
             // 3. 价格在240 EMA下方
             else if low_price < min_break && self.prev_low >= min_break && close_price < ema_value {
                 let stop_price = close_price + (self.atr_multiplier * atr_value); // ATR止损
-                let stop_price = (stop_price * 1000000.0).round() / 1000000.0;
+                let stop_price = align_price_precision(close_price, stop_price); // 与市场价格对齐精度
                 
                 self.current_signal = 2;
                 self.last_price = close_price;
