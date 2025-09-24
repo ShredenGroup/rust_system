@@ -204,7 +204,7 @@ impl Q1Factory {
             info!("   📈 获取 {} 历史数据", symbol.as_str());
             api_manager.get_history_klines(
                 symbol.as_str().to_string(),
-                "1h".to_string(),
+                "1m".to_string(),
                 None,
                 None,
                 Some("241".to_string()),  // 获取足够的K线用于初始化（240 EMA需要）
@@ -244,7 +244,7 @@ impl Q1Factory {
         let mut ws_configs = Vec::new();
         for symbol in &trading_symbols {
             let symbol_str = symbol.as_str().to_lowercase();
-            let interval = "1h";
+            let interval = "1m";
             
             let kline_config = KlineConfig::new(
                 &symbol_str,
@@ -266,7 +266,7 @@ impl Q1Factory {
 
         // 启动所有WebSocket连接
         for (symbol, config) in &ws_configs {
-            info!("🔌 尝试建立WebSocket连接: {}/1h", symbol.as_str());
+            info!("🔌 尝试建立WebSocket连接: {}/1m", symbol.as_str());
             match ws_manager.start_kline(config.clone()).await {
                 Ok(_) => {
                     info!("✅ {} WebSocket连接已建立", symbol.as_str());
