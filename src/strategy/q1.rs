@@ -4,6 +4,7 @@ use crate::common::enums::{Exchange, StrategyName};
 use crate::models::{TradingSignal, Side, TradingSymbol};
 use crate::common::ts::{Strategy, IsClosed, SymbolEnum, SymbolSetter};
 use crate::common::utils::{get_timestamp_ms, align_price_precision};
+use crate::signal_log;
 use anyhow::Result;
 
 #[derive(Clone)]
@@ -141,14 +142,19 @@ impl Q1Strategy {
             // 2. 前一根K线没有突破35根K线的高点
             // 3. 价格在240 EMA上方
             if high_price > max_break && self.prev_high < max_break && close_price > ema_value {
-                let stop_price = close_price - (self.atr_multiplier * atr_value); // ATR止损
-                let stop_price = align_price_precision(close_price, stop_price); // 与市场价格对齐精度
+                let raw_stop_price = close_price - (self.atr_multiplier * atr_value); // ATR止损
+                let stop_price = align_price_precision(close_price, raw_stop_price); // 与市场价格对齐精度
+                
+                signal_log!(info, "🎯 Q1策略发出开多信号: 交易对={}, 当前价格={:.8}, 原始止损价={:.8}, 对齐后止损价={:.8}", 
+                    self.symbol.as_str(), close_price, raw_stop_price, stop_price);
                 
                 self.current_signal = 1;
                 self.last_price = close_price;
                 self.last_stop_price = Some(stop_price);
                 // 计算数量: 20/close_price 向下取整，最小0.001
                 let quantity = (20.0 / close_price).floor().max(0.001);
+                
+                signal_log!(info, "📊 开多信号详情: 数量={:.8}, 止损价={:.8}, 价格精度对齐完成", quantity, stop_price);
                 
                 return Some(TradingSignal::new_market_signal(
                     1,
@@ -168,14 +174,19 @@ impl Q1Strategy {
             // 2. 前一根K线没有突破35根K线的低点
             // 3. 价格在240 EMA下方
             else if low_price < min_break && self.prev_low >= min_break && close_price < ema_value {
-                let stop_price = close_price + (self.atr_multiplier * atr_value); // ATR止损
-                let stop_price = align_price_precision(close_price, stop_price); // 与市场价格对齐精度
+                let raw_stop_price = close_price + (self.atr_multiplier * atr_value); // ATR止损
+                let stop_price = align_price_precision(close_price, raw_stop_price); // 与市场价格对齐精度
+                
+                signal_log!(info, "🎯 Q1策略发出开空信号: 交易对={}, 当前价格={:.8}, 原始止损价={:.8}, 对齐后止损价={:.8}", 
+                    self.symbol.as_str(), close_price, raw_stop_price, stop_price);
                 
                 self.current_signal = 2;
                 self.last_price = close_price;
                 self.last_stop_price = Some(stop_price);
                 // 计算数量: 20/close_price 向下取整，最小0.001
                 let quantity = (20.0 / close_price).floor().max(0.001);
+                
+                signal_log!(info, "📊 开空信号详情: 数量={:.8}, 止损价={:.8}, 价格精度对齐完成", quantity, stop_price);
                 
                 return Some(TradingSignal::new_market_signal(
                     1,
