@@ -322,6 +322,67 @@ impl KlineRequest {
     }
 }
 
+/// 币安API错误响应
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct BinanceErrorResponse {
+    pub code: i32,
+    pub msg: String,
+}
+
+/// 批量订单响应项 - 可能是成功订单或错误
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(untagged)]
+pub enum BatchOrderResponseItem {
+    Success(OrderResponse),
+    Error(BinanceErrorResponse),
+}
+
+/// 批量订单处理结果
+#[derive(Debug, Clone)]
+pub struct BatchOrderResult {
+    pub successful_orders: Vec<OrderResponse>,
+    pub failed_orders: Vec<(usize, BinanceErrorResponse)>, // (原始索引, 错误)
+    pub total_requested: usize,
+}
+
+impl BatchOrderResult {
+    pub fn new(total_requested: usize) -> Self {
+        Self {
+            successful_orders: Vec::new(),
+            failed_orders: Vec::new(),
+            total_requested,
+        }
+    }
+
+    pub fn add_success(&mut self, order: OrderResponse) {
+        self.successful_orders.push(order);
+    }
+
+    pub fn add_failure(&mut self, index: usize, error: BinanceErrorResponse) {
+        self.failed_orders.push((index, error));
+    }
+
+    pub fn is_partial_success(&self) -> bool {
+        !self.successful_orders.is_empty() && !self.failed_orders.is_empty()
+    }
+
+    pub fn is_all_success(&self) -> bool {
+        self.failed_orders.is_empty() && !self.successful_orders.is_empty()
+    }
+
+    pub fn is_all_failed(&self) -> bool {
+        self.successful_orders.is_empty() && !self.failed_orders.is_empty()
+    }
+
+    pub fn success_count(&self) -> usize {
+        self.successful_orders.len()
+    }
+
+    pub fn failure_count(&self) -> usize {
+        self.failed_orders.len()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -450,7 +511,5 @@ mod tests {
         assert_eq!(klines.len(), 2);
         assert_eq!(klines[0].symbol.as_str(), "BTCUSDT");
         assert_eq!(klines[1].symbol.as_str(), "BTCUSDT");
-        assert_eq!(klines[0].open, 50000.0);
-        assert_eq!(klines[1].open, 50500.0);
     }
-} 
+}

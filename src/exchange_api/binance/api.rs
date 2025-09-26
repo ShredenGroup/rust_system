@@ -3,14 +3,13 @@ use crate::common::utils::generate_hmac_signature;
 use crate::models::{TradingSignal, Signal, MarketSignal, Side};
 use crate::dto::binance::rest_api::{
     OrderType, OrderSide, TimeInForce, KlineRequest, KlineResponse,
-    OrderRequest, OrderResponse
+    OrderRequest, OrderResponse, BatchOrderResponseItem, BatchOrderResult
 };
-use anyhow::{Ok, Result};
+use anyhow::Result;
 use reqwest::Client;
 use serde_json;
 use std::collections::HashMap;
 use std::time::{SystemTime, UNIX_EPOCH};
-use crate::common::enums::StrategyName;
 
 // 导入日志宏
 use crate::{order_log, error_log};
@@ -60,7 +59,6 @@ impl BinanceFuturesApi {
         let params = request.to_params()?;
         let query = self.build_query_string(&params);
         let url = format!("{}/klines?{}", self.base_url, query);
-        println!("Requesting URL: {}", url);
         let response = self.client.get(&url).send().await?;
         if !response.status().is_success() {
             let error_text = response.text().await?;
@@ -282,7 +280,7 @@ impl BinanceFuturesApi {
                 // 处理市价信号
                 self.mkt_sig2order(signal, market_signal).await
             }
-            Signal::Limit(limit_signal) => {
+            Signal::Limit(_limit_signal) => {
                 // 处理限价信号（待实现）
                 Err(anyhow::anyhow!("限价信号处理功能待实现"))
             }
@@ -329,7 +327,6 @@ impl BinanceFuturesApi {
             };
             
             all_orders.push(close_order_request);
-            println!("准备下1个平仓订单: 数量 {}, reduce_only=true", signal.quantity);
             
         } else {
             // 开仓操作：原有的逻辑
@@ -388,8 +385,6 @@ impl BinanceFuturesApi {
                 all_orders.push(stop_order_request);
                 all_orders.push(profit_order_request);
                 
-                println!("准备下3个订单: 主市价单 + 止损单 + 止盈单");
-                
             } else if let Some(stop_price) = market_signal.stop_price {
                 // 只有止损单
                 let stop_order_request = OrderRequest {
@@ -408,7 +403,6 @@ impl BinanceFuturesApi {
                 };
                 
                 all_orders.push(stop_order_request);
-                println!("准备下2个订单: 主市价单 + 止损单");
                 
             } else if let Some(profit_price) = market_signal.profit_price {
                 // 只有止盈单
@@ -428,29 +422,130 @@ impl BinanceFuturesApi {
                 };
                 
                 all_orders.push(profit_order_request);
-                println!("准备下2个订单: 主市价单 + 止盈单");
                 
             } else {
-                println!("准备下1个订单: 主市价单");
             }
         }
 
-        // 3. 一次性下所有订单
-        let responses = self.batch_orders(all_orders, None).await?;
+        // 3. 一次性下所有订单（带重试机制）
+        let batch_result = self.batch_orders_with_retry(all_orders, None).await?;
         
-        // 4. 收集所有订单ID
-        let mut order_ids = Vec::new();
-        for response in responses {
-            order_ids.push(response.order_id.to_string());
+        // 4. 处理批量订单结果
+        if batch_result.is_all_failed() {
+            // 所有订单都失败了
+            let first_error = &batch_result.failed_orders[0].1;
+            return Err(anyhow::anyhow!("所有订单都失败了: {}", first_error.msg));
         }
         
-        if market_signal.is_closed {
-            println!("平仓订单执行成功完成！共下 {} 个订单，订单ID: {:?}", order_ids.len(), order_ids);
-        } else {
-            println!("开仓订单执行成功完成！共下 {} 个订单，订单ID: {:?}", order_ids.len(), order_ids);
+        // 5. 收集成功的订单ID
+        let mut order_ids = Vec::new();
+        for order in &batch_result.successful_orders {
+            order_ids.push(order.order_id.to_string());
+        }
+        
+        // 6. 如果有部分失败的订单，记录警告
+        if batch_result.is_partial_success() {
+            order_log!(warn, "⚠️ 部分订单失败: 成功{}/{}，失败{}/{}", 
+                batch_result.success_count(), batch_result.total_requested,
+                batch_result.failure_count(), batch_result.total_requested);
+            
+            // 记录失败的订单详情
+            for (index, error) in &batch_result.failed_orders {
+                order_log!(error, "❌ 订单{}失败: 错误码={}, 消息={}", index + 1, error.code, error.msg);
+            }
         }
         
         Ok(order_ids)
+    }
+
+    /// 带重试机制的批量下单（简化版）
+    /// 
+    /// # Arguments
+    /// * `orders` - 订单列表，最多5个订单
+    /// * `recv_window` - 接收窗口时间（可选）
+    /// 
+    /// # Returns
+    /// * `Result<BatchOrderResult>` - 批量订单结果
+    /// 
+    /// # 重试策略
+    /// - 最多重试3次
+    /// - 如果所有重试都失败，触发熔断机制
+    pub async fn batch_orders_with_retry(
+        &self,
+        orders: Vec<OrderRequest>,
+        recv_window: Option<u64>,
+    ) -> Result<BatchOrderResult> {
+        let mut result = self.batch_orders(orders.clone(), recv_window).await?;
+        
+        // 如果有失败的订单，进行重试
+        if !result.failed_orders.is_empty() {
+            order_log!(warn, "🔄 开始重试失败的订单: {}/{} 个订单需要重试", 
+                result.failed_orders.len(), orders.len());
+            
+            // 重试3次
+            for retry_attempt in 1..=3 {
+                if result.failed_orders.is_empty() {
+                    break; // 没有失败的订单了，停止重试
+                }
+                
+                order_log!(info, "🔄 第{}次重试: {} 个失败订单", retry_attempt, result.failed_orders.len());
+                
+                // 准备重试的订单
+                let mut retry_orders = Vec::new();
+                let mut retry_indices = Vec::new();
+                
+                for (original_index, _error) in &result.failed_orders {
+                    if let Some(order) = orders.get(*original_index) {
+                        retry_orders.push(order.clone());
+                        retry_indices.push(*original_index);
+                    }
+                }
+                
+                // 执行重试
+                let retry_result = self.batch_orders(retry_orders, recv_window).await;
+                
+                match retry_result {
+                    Ok(retry_result) => {
+                        // 清空之前的失败订单
+                        result.failed_orders.clear();
+                        
+                        // 先计算统计信息
+                        let success_count = retry_result.successful_orders.len();
+                        let failure_count = retry_result.failed_orders.len();
+                        
+                        // 处理重试结果
+                        for order in retry_result.successful_orders {
+                            result.add_success(order);
+                        }
+                        
+                        for (original_index, error) in &retry_result.failed_orders {
+                            result.add_failure(*original_index, error.clone());
+                        }
+                        
+                        order_log!(info, "✅ 第{}次重试完成: 成功{}, 失败{}", 
+                            retry_attempt, success_count, failure_count);
+                    }
+                    Err(e) => {
+                        order_log!(error, "💥 第{}次重试失败: {}", retry_attempt, e);
+                        
+                        // 检查是否应该触发熔断
+                        if retry_attempt == 3 {
+                            order_log!(error, "🚨 触发熔断机制: 重试3次都失败，关闭系统");
+                            
+                            // 触发熔断，关闭整个进程
+                            std::process::exit(1);
+                        }
+                    }
+                }
+            }
+        }
+        
+        // 最终结果统计
+        order_log!(info, "📊 批量订单最终结果: 成功{}/{}，失败{}/{}", 
+            result.success_count(), result.total_requested,
+            result.failure_count(), result.total_requested);
+        
+        Ok(result)
     }
 
     /// 批量下单 - 一次性下多个订单
@@ -491,7 +586,7 @@ impl BinanceFuturesApi {
         &self,
         orders: Vec<OrderRequest>,
         recv_window: Option<u64>,
-    ) -> Result<Vec<OrderResponse>> {
+    ) -> Result<BatchOrderResult> {
         // 验证订单数量（最多5个）
         if orders.is_empty() {
             return Err(anyhow::anyhow!("订单列表不能为空"));
@@ -605,42 +700,6 @@ impl BinanceFuturesApi {
             self.base_url, query_string, signature
         );
 
-        println!("批量下单请求URL: {}", url);
-        println!("查询字符串: {}", query_string);
-        println!("签名: {}", signature);
-        
-        // 调试信息：显示所有参数
-        println!("🔍 调试信息:");
-        println!("   参数数量: {}", params.len());
-        for (key, value) in &params {
-            println!("   {}: {}", key, value);
-        }
-        
-        // 调试信息：显示排序后的参数
-        let mut sorted_params: Vec<_> = params.iter().collect();
-        sorted_params.sort_by(|a, b| a.0.cmp(b.0));
-        println!("   排序后的参数:");
-        for (key, value) in &sorted_params {
-            println!("   {}: {}", key, value);
-        }
-        
-        // 调试信息：显示用于签名的查询字符串
-        let debug_query = sorted_params.iter()
-            .map(|(k, v)| format!("{}={}", k, v))
-            .collect::<Vec<_>>()
-            .join("&");
-        println!("   用于签名的查询字符串: {}", debug_query);
-        
-        // 重新生成签名进行对比
-        let debug_signature = self.generate_signature(&debug_query);
-        println!("   重新生成的签名: {}", debug_signature);
-        println!("   原始签名: {}", signature);
-        println!("   签名是否匹配: {}", signature == debug_signature);
-        
-        // 显示URL编码前后的对比
-        println!("   JSON原始值: {}", batch_orders_json);
-        println!("   JSON编码后: {}", encoded_batch_orders);
-        
         // 发送请求
         let response = self
             .client
@@ -655,7 +714,6 @@ impl BinanceFuturesApi {
         // 检查响应状态
         if !status.is_success() {
             let error_text = response.text().await?;
-            println!("❌ 批量下单API请求失败: HTTP状态: {}, 错误: {}", status, error_text);
             // 记录到订单日志
             order_log!(error, "❌ 批量下单失败: HTTP状态={}, 响应={}", status, error_text);
             return Err(anyhow::anyhow!("批量下单API请求失败: HTTP状态: {}, 错误: {}", status, error_text));
@@ -663,19 +721,40 @@ impl BinanceFuturesApi {
 
         // 获取响应文本进行调试
         let response_text = response.text().await?;
-        println!("📡 API响应: {}", response_text);
         // 记录到订单日志
         order_log!(info, "📡 批量下单响应: {}", response_text);
 
-        // 解析响应 - 返回订单响应列表
-        let order_responses: Vec<OrderResponse> = serde_json::from_str(&response_text)?;
+        // 解析混合响应 - 可能包含成功订单和错误
+        let response_items: Vec<BatchOrderResponseItem> = serde_json::from_str(&response_text)?;
         
-        println!("✅ 成功解析 {} 个订单响应", order_responses.len());
-        for (i, order_response) in order_responses.iter().enumerate() {
-            println!("   订单{}: ID={}, 状态={:?}", i + 1, order_response.order_id, order_response.status);
+        // 处理混合响应
+        let mut result = BatchOrderResult::new(orders.len());
+        
+        for (index, item) in response_items.iter().enumerate() {
+            match item {
+                BatchOrderResponseItem::Success(order) => {
+                    result.add_success(order.clone());
+                    order_log!(info, "✅ 订单{}成功: ID={}, 状态={}", index + 1, order.order_id, order.status);
+                }
+                BatchOrderResponseItem::Error(error) => {
+                    result.add_failure(index, error.clone());
+                    order_log!(error, "❌ 订单{}失败: 错误码={}, 消息={}", index + 1, error.code, error.msg);
+                }
+            }
         }
         
-        Ok(order_responses)
+        // 记录批量订单结果摘要
+        if result.is_all_success() {
+            order_log!(info, "🎉 批量订单全部成功: {}/{}", result.success_count(), result.total_requested);
+        } else if result.is_all_failed() {
+            order_log!(error, "💥 批量订单全部失败: {}/{}", result.failure_count(), result.total_requested);
+        } else if result.is_partial_success() {
+            order_log!(warn, "⚠️ 批量订单部分成功: 成功{}/{}，失败{}/{}", 
+                result.success_count(), result.total_requested,
+                result.failure_count(), result.total_requested);
+        }
+        
+        Ok(result)
     }
 
     /// 批量市价买入的便捷方法
@@ -697,7 +776,8 @@ impl BinanceFuturesApi {
             })
             .collect();
 
-        self.batch_orders(orders, None).await
+        let result = self.batch_orders(orders, None).await?;
+        Ok(result.successful_orders)
     }
 
     /// 批量市价卖出的便捷方法
@@ -719,7 +799,8 @@ impl BinanceFuturesApi {
             })
             .collect();
 
-        self.batch_orders(orders, None).await
+        let result = self.batch_orders(orders, None).await?;
+        Ok(result.successful_orders)
     }
 
     /// 批量限价买入的便捷方法
@@ -743,7 +824,8 @@ impl BinanceFuturesApi {
             })
             .collect();
 
-        self.batch_orders(orders, None).await
+        let result = self.batch_orders(orders, None).await?;
+        Ok(result.successful_orders)
     }
 
     /// 批量限价卖出的便捷方法
@@ -767,7 +849,8 @@ impl BinanceFuturesApi {
             })
             .collect();
 
-        self.batch_orders(orders, None).await
+        let result = self.batch_orders(orders, None).await?;
+        Ok(result.successful_orders)
     }
 
     /// 取消指定交易对的所有开放订单
@@ -815,10 +898,6 @@ impl BinanceFuturesApi {
             self.base_url, query_string, signature
         );
 
-        println!("🔄 取消所有开放订单请求URL: {}", url);
-        println!("📊 请求参数: symbol={}, recvWindow={}, timestamp={}", 
-            symbol, recv_window.unwrap_or(60000), Self::get_timestamp());
-
         // 发送DELETE请求
         let response = self
             .client
@@ -833,15 +912,12 @@ impl BinanceFuturesApi {
         // 检查响应状态
         if !status.is_success() {
             let error_text = response.text().await?;
-            println!("❌ 取消所有开放订单失败: HTTP状态: {}, 错误: {}", 
-                status, error_text);
             return Err(anyhow::anyhow!("取消所有开放订单失败: HTTP状态: {}, 错误: {}", 
                 status, error_text));
         }
 
         // 获取响应文本
         let response_text = response.text().await?;
-        println!("📡 取消所有开放订单响应: {}", response_text);
 
         // 检查响应内容
         if response_text.contains("code") && response_text.contains("msg") {
@@ -851,7 +927,6 @@ impl BinanceFuturesApi {
                 let json_response = json_result.unwrap();
                 if let Some(code) = json_response.get("code") {
                     if code.as_u64() == Some(200) {
-                        println!("✅ 成功取消所有开放订单");
                         return Ok(());
                     } else {
                         let msg = json_response.get("msg").and_then(|m| m.as_str()).unwrap_or("未知错误");
@@ -862,7 +937,6 @@ impl BinanceFuturesApi {
         }
 
         // 如果无法解析JSON，但HTTP状态是成功的，我们认为操作成功
-        println!("✅ 所有开放订单已取消（HTTP状态: {}）", status);
         Ok(())
     }
 }
@@ -915,34 +989,24 @@ mod tests {
             }
         ];
         
-        println!("🧪 开始测试批量下单功能...");
-        println!("📊 测试订单详情:");
-        println!("   订单1: TURBOUSDT 市价买入 10000");
-        println!("   订单2: TURBOUSDT 止盈卖出 10000 (价格: 1.0)");
-        println!("   订单3: TURBOUSDT 止损卖出 10000 (价格: 0.002)");
-        println!("   总计: {} 个订单", orders.len());
         
         // 执行批量下单
         let result = api.batch_orders(orders, None).await;
         
         if result.is_ok() {
-            let responses = result.unwrap();
-            println!("✅ 批量下单成功！");
-            println!("📋 订单响应列表:");
-            
-            for (i, response) in responses.iter().enumerate() {
-                println!("   订单{}: ID={}, 状态={:?}", i + 1, response.order_id, response.status);
-            }
-            
-            println!("📊 共成功下 {} 个订单", responses.len());
+            let batch_result = result.unwrap();
             
             // 验证订单数量
-            assert_eq!(responses.len(), 3, "应该成功下3个订单");
+            assert_eq!(batch_result.successful_orders.len(), 3, "应该成功下3个订单");
             
-            println!("🎉 测试通过！成功同时下了3个订单");
+            // 如果有失败的订单，记录但不失败测试
+            if batch_result.is_partial_success() {
+                println!("⚠️ 部分订单失败: 成功{}/{}，失败{}/{}", 
+                    batch_result.success_count(), batch_result.total_requested,
+                    batch_result.failure_count(), batch_result.total_requested);
+            }
         } else {
             let error = result.unwrap_err();
-            println!("❌ 批量下单失败: {}", error);
             panic!("测试失败：{}", error);
         }
     }
@@ -968,30 +1032,18 @@ mod tests {
             0.5,                         // latest_price: 当前价格
         );
         
-        println!("🧪 开始测试市价单信号转订单...");
-        println!("📊 测试信号详情:");
-        println!("   交易对: {}", signal.symbol);
-        println!("   方向: {:?}", signal.side);
-        println!("   数量: {}", signal.quantity);
-        println!("   策略: {:?}", signal.strategy);
-        println!("   无止损止盈");
         
         // 执行信号转订单
         let result = api.signal_to_order(&signal).await;
         
         if result.is_ok() {
             let order_ids = result.unwrap();
-            println!("✅ 市价单信号转订单成功！");
-            println!("📋 订单ID列表: {:?}", order_ids);
-            println!("📊 共成功下 {} 个订单", order_ids.len());
             
             // 验证订单数量：只有市价单，应该是1个
             assert_eq!(order_ids.len(), 1, "应该只下1个订单：主市价单");
             
-            println!("🎉 测试通过！成功将市价单信号转换为1个订单");
         } else {
             let error = result.unwrap_err();
-            println!("❌ 市价单信号转订单失败: {}", error);
             panic!("测试失败：{}", error);
         }
     }
@@ -1017,31 +1069,18 @@ mod tests {
             0.5,                         // latest_price: 当前价格
         );
         
-        println!("🧪 开始测试市价单+止损单信号转订单...");
-        println!("📊 测试信号详情:");
-        println!("   交易对: {}", signal.symbol);
-        println!("   方向: {:?}", signal.side);
-        println!("   数量: {}", signal.quantity);
-        println!("   策略: {:?}", signal.strategy);
-        println!("   止损价: 0.002");
-        println!("   无止盈");
         
         // 执行信号转订单
         let result = api.signal_to_order(&signal).await;
         
         if result.is_ok() {
             let order_ids = result.unwrap();
-            println!("✅ 市价单+止损单信号转订单成功！");
-            println!("📋 订单ID列表: {:?}", order_ids);
-            println!("📊 共成功下 {} 个订单", order_ids.len());
             
             // 验证订单数量：市价单 + 止损单，应该是2个
             assert_eq!(order_ids.len(), 2, "应该下2个订单：主市价单 + 止损单");
             
-            println!("🎉 测试通过！成功将市价单+止损单信号转换为2个订单");
         } else {
             let error = result.unwrap_err();
-            println!("❌ 市价单+止损单信号转订单失败: {}", error);
             panic!("测试失败：{}", error);
         }
     }

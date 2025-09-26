@@ -120,8 +120,8 @@ impl Q1Strategy {
                 self.current_signal = 0;
                 self.last_price = close_price;
                 
-                // 计算数量: 20/close_price 向下取整，最小0.001
-                let quantity = (20.0 / close_price).floor().max(0.001);
+                // 计算数量: 50/close_price 向下取整，最小0.001
+                let quantity = (50.0 / close_price).floor().max(0.001);
                 
                 return Some(TradingSignal::new_close_signal(
                     1,
@@ -151,8 +151,8 @@ impl Q1Strategy {
                 self.current_signal = 1;
                 self.last_price = close_price;
                 self.last_stop_price = Some(stop_price);
-                // 计算数量: 20/close_price 向下取整，最小0.001
-                let quantity = (20.0 / close_price).floor().max(0.001);
+                // 计算数量: 50/close_price 向下取整，最小0.001
+                let quantity = (50.0 / close_price).floor().max(0.001);
                 
                 signal_log!(info, "📊 开多信号详情: 数量={:.8}, 止损价={:.8}, 价格精度对齐完成", quantity, stop_price);
                 
@@ -184,7 +184,7 @@ impl Q1Strategy {
                 self.last_price = close_price;
                 self.last_stop_price = Some(stop_price);
                 // 计算数量: 20/close_price 向下取整，最小0.001
-                let quantity = (20.0 / close_price).floor().max(0.001);
+                let quantity = (50.0 / close_price).floor().max(0.001);
                 
                 signal_log!(info, "📊 开空信号详情: 数量={:.8}, 止损价={:.8}, 价格精度对齐完成", quantity, stop_price);
                 

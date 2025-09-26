@@ -2,6 +2,24 @@ use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use std::fmt::{self, Display};
 use std::str::FromStr;
 
+/// 交易对精度信息
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct SymbolPrecision {
+    /// 价格精度（小数位数）
+    pub price_precision: u8,
+    /// 数量精度（小数位数）
+    pub quantity_precision: u8,
+}
+
+impl SymbolPrecision {
+    pub fn new(price_precision: u8, quantity_precision: u8) -> Self {
+        Self {
+            price_precision,
+            quantity_precision,
+        }
+    }
+}
+
 /// 高效的交易对符号类型
 /// 对于常用交易对使用预定义枚举（零成本），对于其他交易对使用固定大小数组
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Copy)]
@@ -61,6 +79,46 @@ impl TradingSymbol {
                 }
             }
         }
+    }
+
+    /// 获取交易对的精度信息
+    pub fn get_precision(&self) -> SymbolPrecision {
+        match self {
+            // 主流币种精度配置（基于币安期货）
+            TradingSymbol::BTCUSDT => SymbolPrecision::new(2, 3),  // 价格2位，数量3位
+            TradingSymbol::ETHUSDT => SymbolPrecision::new(2, 3),  // 价格2位，数量3位
+            TradingSymbol::SOLUSDT => SymbolPrecision::new(3, 2),  // 价格3位，数量2位
+            TradingSymbol::ADAUSDT => SymbolPrecision::new(4, 0),  // 价格4位，数量0位
+            TradingSymbol::XRPUSDT => SymbolPrecision::new(4, 0),  // 价格4位，数量0位
+            TradingSymbol::DOGEUSDT => SymbolPrecision::new(5, 0), // 价格5位，数量0位
+            TradingSymbol::TURBOUSDT => SymbolPrecision::new(6, 0), // 价格6位，数量0位
+            TradingSymbol::BNBUSDT => SymbolPrecision::new(2, 3),  // 价格2位，数量3位
+            TradingSymbol::AVAXUSDT => SymbolPrecision::new(3, 2), // 价格3位，数量2位
+            TradingSymbol::MATICUSDT => SymbolPrecision::new(4, 0), // 价格4位，数量0位
+            TradingSymbol::DOTUSDT => SymbolPrecision::new(3, 2),  // 价格3位，数量2位
+            TradingSymbol::LINKUSDT => SymbolPrecision::new(3, 2), // 价格3位，数量2位
+            TradingSymbol::LTCUSDT => SymbolPrecision::new(2, 3),  // 价格2位，数量3位
+            TradingSymbol::UNIUSDT => SymbolPrecision::new(3, 2),  // 价格3位，数量2位
+            TradingSymbol::PEPEUSDT => SymbolPrecision::new(8, 0), // 价格8位，数量0位
+            TradingSymbol::NEIROUSDT => SymbolPrecision::new(4, 0), // 价格4位，数量0位
+            TradingSymbol::ONDOUSDT => SymbolPrecision::new(4, 0), // 价格4位，数量0位
+            TradingSymbol::AAVEUSDT => SymbolPrecision::new(2, 3), // 价格2位，数量3位
+            TradingSymbol::Custom(_) => SymbolPrecision::new(6, 3), // 自定义符号默认精度
+        }
+    }
+
+    /// 根据价格精度调整价格
+    pub fn align_price(&self, price: f64) -> f64 {
+        let precision = self.get_precision();
+        let multiplier = 10_f64.powi(precision.price_precision as i32);
+        (price * multiplier).round() / multiplier
+    }
+
+    /// 根据数量精度调整数量
+    pub fn align_quantity(&self, quantity: f64) -> f64 {
+        let precision = self.get_precision();
+        let multiplier = 10_f64.powi(precision.quantity_precision as i32);
+        (quantity * multiplier).round() / multiplier
     }
 
     /// 检查是否是预定义的主流交易对
@@ -262,6 +320,86 @@ mod tests {
     fn test_symbol_too_long() {
         // 测试超过20字节的符号应该panic
         TradingSymbol::from_string("VERY_LONG_SYMBOL_NAME_THAT_EXCEEDS_TWENTY_BYTES".to_string());
+    }
+
+    #[test]
+    fn test_symbol_precision() {
+        // 测试BTC精度
+        let btc = TradingSymbol::BTCUSDT;
+        let btc_precision = btc.get_precision();
+        assert_eq!(btc_precision.price_precision, 2);
+        assert_eq!(btc_precision.quantity_precision, 3);
+        
+        // 测试PEPE精度
+        let pepe = TradingSymbol::PEPEUSDT;
+        let pepe_precision = pepe.get_precision();
+        assert_eq!(pepe_precision.price_precision, 8);
+        assert_eq!(pepe_precision.quantity_precision, 0);
+        
+        // 测试ETH精度
+        let eth = TradingSymbol::ETHUSDT;
+        let eth_precision = eth.get_precision();
+        assert_eq!(eth_precision.price_precision, 2);
+        assert_eq!(eth_precision.quantity_precision, 3);
+    }
+
+    #[test]
+    fn test_price_alignment() {
+        let btc = TradingSymbol::BTCUSDT;
+        
+        // 测试BTC价格对齐（2位小数）
+        assert_eq!(btc.align_price(65000.123456), 65000.12);
+        assert_eq!(btc.align_price(65000.999), 65001.0);
+        assert_eq!(btc.align_price(65000.0), 65000.0);
+        
+        let pepe = TradingSymbol::PEPEUSDT;
+        
+        // 测试PEPE价格对齐（8位小数）
+        assert_eq!(pepe.align_price(0.0000123456789), 0.00001235);
+        assert_eq!(pepe.align_price(0.0000123456781), 0.00001235);
+        
+        let eth = TradingSymbol::ETHUSDT;
+        
+        // 测试ETH价格对齐（2位小数）
+        assert_eq!(eth.align_price(3200.567), 3200.57);
+        assert_eq!(eth.align_price(3200.123), 3200.12);
+    }
+
+    #[test]
+    fn test_quantity_alignment() {
+        let btc = TradingSymbol::BTCUSDT;
+        
+        // 测试BTC数量对齐（3位小数）
+        assert_eq!(btc.align_quantity(0.0012345), 0.001);
+        assert_eq!(btc.align_quantity(0.0015678), 0.002);
+        assert_eq!(btc.align_quantity(1.0), 1.0);
+        
+        let pepe = TradingSymbol::PEPEUSDT;
+        
+        // 测试PEPE数量对齐（0位小数，整数）
+        assert_eq!(pepe.align_quantity(1000.5), 1001.0);
+        assert_eq!(pepe.align_quantity(1000.4), 1000.0);
+        assert_eq!(pepe.align_quantity(1000.0), 1000.0);
+        
+        let eth = TradingSymbol::ETHUSDT;
+        
+        // 测试ETH数量对齐（3位小数）
+        assert_eq!(eth.align_quantity(0.123456), 0.123);
+        assert_eq!(eth.align_quantity(0.123567), 0.124);
+    }
+
+    #[test]
+    fn test_custom_symbol_precision() {
+        let custom = TradingSymbol::from_string("NEWCOIN".to_string());
+        let precision = custom.get_precision();
+        
+        // 自定义符号使用默认精度
+        assert_eq!(precision.price_precision, 6);
+        assert_eq!(precision.quantity_precision, 3);
+        
+        // 测试自定义符号的价格和数量对齐
+        assert_eq!(custom.align_price(123.456789), 123.456789);
+        assert_eq!(custom.align_quantity(0.123456), 0.123);
     }
 
     #[test]
