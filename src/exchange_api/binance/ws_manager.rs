@@ -9,7 +9,7 @@ use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::{mpsc, Mutex};
 use tokio::task::JoinHandle;
-use tracing::{error, info, warn};
+use crate::{websocket_log, system_log};
 
 /// WebSocket 数据类型
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -107,7 +107,7 @@ impl WebSocketManager {
                     tokio::spawn(async move {
                         while let Some(data) = mark_price_rx.recv().await {
                             if let Err(e) = message_tx_clone.send(WebSocketMessage::MarkPrice(Arc::new(data))) {
-                                eprintln!("Failed to forward mark price message: {}", e);
+                                websocket_log!(warn, "Failed to forward mark price message: {}", e);
                                 break;
                             }
                         }
@@ -124,7 +124,7 @@ impl WebSocketManager {
                         .await;
                     
                     if let Err(e) = result {
-                        eprintln!("Mark price WebSocket connection failed for {}: {}", symbol, e);
+                        websocket_log!(warn, "Mark price connection failed: {} - {}", symbol, e);
                     }
                 }
                 Ok(())
@@ -139,7 +139,7 @@ impl WebSocketManager {
                     tokio::spawn(async move {
                         while let Some(data) = mark_price_rx.recv().await {
                             if let Err(e) = message_tx_clone.send(WebSocketMessage::MarkPrice(Arc::new(data))) {
-                                eprintln!("Failed to forward mark price message: {}", e);
+                                websocket_log!(warn, "Failed to forward mark price message: {}", e);
                                 break;
                             }
                         }
@@ -150,14 +150,14 @@ impl WebSocketManager {
                         .await;
                     
                     if let Err(e) = result {
-                        eprintln!("Mark price WebSocket connection failed for {}: {}", symbol, e);
+                        websocket_log!(warn, "Mark price connection failed: {} - {}", symbol, e);
                     }
                 }
                 Ok(())
             };
             
             if let Err(e) = result {
-                eprintln!("Mark price WebSocket connection failed: {}", e);
+                websocket_log!(error, "Mark price connection failed: {}", e);
                 // 更新连接状态
                 let mut conns = connections.lock().await;
                 if let Some((_, info)) = conns.get_mut(&connection_id_clone) {
@@ -177,7 +177,71 @@ impl WebSocketManager {
         Ok(())
     }
 
-    /// 启动 K线数据 WebSocket 连接
+    /// 启动 K线数据 WebSocket 连接（优化版本 - 批量订阅）
+    pub async fn start_multi_kline(&self, config: KlineConfig) -> Result<()> {
+        let connection_id = format!("multi_kline_{}_{}", config.symbol.join("_"), config.interval);
+        let message_tx = self.message_tx.clone();
+        
+        let ws_client = self.ws_client.clone();
+        let connections = self.connections.clone();
+        let connection_id_clone = connection_id.clone();
+        
+        // 克隆配置数据以避免生命周期问题
+        let symbols = config.symbol.clone();
+        let interval = config.interval.clone();
+        let tags = config.base.tags.clone();
+        
+        // 创建连接信息
+        let connection_info = ConnectionInfo {
+            connection_id: connection_id.clone(),
+            symbol: symbols.join(","),  // 转换为字符串用于显示
+            data_type: WebSocketDataType::Kline,
+            status: ConnectionStatus::Connecting,
+            created_at: std::time::Instant::now(),
+            last_message_at: None,
+            tags: tags.clone(),
+        };
+        
+        let handle = tokio::spawn(async move {
+            // 创建专门用于 KlineData 的通道
+            let (kline_tx, mut kline_rx) = mpsc::unbounded_channel::<KlineData>();
+            
+            // 启动消息转发任务
+            let message_tx_clone = message_tx.clone();
+            tokio::spawn(async move {
+                while let Some(data) = kline_rx.recv().await {
+                    if let Err(e) = message_tx_clone.send(WebSocketMessage::Kline(Arc::new(data))) {
+                        websocket_log!(warn, "Failed to forward kline message: {}", e);
+                        break;
+                    }
+                }
+            });
+            
+            // 使用批量订阅方法
+            let result = ws_client.subscribe_multiple_klines(&symbols, &interval, kline_tx).await;
+            
+            if let Err(e) = result {
+                websocket_log!(warn, "Multi kline connection failed: {}", e);
+                // 更新连接状态
+                let mut conns = connections.lock().await;
+                if let Some((_, info)) = conns.get_mut(&connection_id_clone) {
+                    info.status = ConnectionStatus::Error(e.to_string());
+                }
+            }
+            
+            // 从连接映射中移除
+            let mut conns = connections.lock().await;
+            conns.remove(&connection_id_clone);
+        });
+        
+        // 保存连接句柄和信息
+        let mut conns = self.connections.lock().await;
+        conns.insert(connection_id, (handle, connection_info));
+        
+        Ok(())
+    }
+
+    /// 启动 K线数据 WebSocket 连接（向后兼容版本）
     pub async fn start_kline(&self, config: KlineConfig) -> Result<()> {
         let connection_id = format!("kline_{}_{}", config.symbol.join("_"), config.interval);
         let message_tx = self.message_tx.clone();
@@ -213,7 +277,7 @@ impl WebSocketManager {
                 tokio::spawn(async move {
                     while let Some(data) = kline_rx.recv().await {
                         if let Err(e) = message_tx_clone.send(WebSocketMessage::Kline(Arc::new(data))) {
-                            eprintln!("Failed to forward kline message: {}", e);
+                            websocket_log!(warn, "Failed to forward kline message: {}", e);
                             break;
                         }
                     }
@@ -222,7 +286,7 @@ impl WebSocketManager {
                 let result = ws_client.subscribe_kline(symbol, &interval, kline_tx).await;
                 
                 if let Err(e) = result {
-                    eprintln!("Kline WebSocket connection failed for {}: {}", symbol, e);
+                    websocket_log!(warn, "Kline connection failed: {} - {}", symbol, e);
                 }
             }
             
@@ -275,7 +339,7 @@ impl WebSocketManager {
                 tokio::spawn(async move {
                     while let Some(data) = depth_rx.recv().await {
                         if let Err(e) = message_tx_clone.send(WebSocketMessage::PartialDepth(Arc::new(data))) {
-                            eprintln!("Failed to forward partial depth message: {}", e);
+                            websocket_log!(warn, "Failed to forward partial depth message: {}", e);
                             break;
                         }
                     }
@@ -284,7 +348,7 @@ impl WebSocketManager {
                 let result = ws_client.subscribe_depth(symbol, &interval, depth_tx).await;
                 
                 if let Err(e) = result {
-                    eprintln!("Partial depth WebSocket connection failed for {}: {}", symbol, e);
+                    websocket_log!(warn, "Partial depth connection failed: {} - {}", symbol, e);
                 }
             }
             
@@ -336,7 +400,7 @@ impl WebSocketManager {
                 tokio::spawn(async move {
                     while let Some(data) = depth_rx.recv().await {
                         if let Err(e) = message_tx_clone.send(WebSocketMessage::DiffDepth(Arc::new(data))) {
-                            eprintln!("Failed to forward diff depth message: {}", e);
+                            websocket_log!(warn, "Failed to forward diff depth message: {}", e);
                             break;
                         }
                     }
@@ -347,7 +411,7 @@ impl WebSocketManager {
                 let result = ws_client.subscribe_depth(symbol, "100ms", depth_tx).await;
                 
                 if let Err(e) = result {
-                    eprintln!("Diff depth WebSocket connection failed for {}: {}", symbol, e);
+                    websocket_log!(warn, "Diff depth connection failed: {} - {}", symbol, e);
                 }
             }
             
@@ -398,7 +462,7 @@ impl WebSocketManager {
                 tokio::spawn(async move {
                     while let Some(data) = book_ticker_rx.recv().await {
                         if let Err(e) = message_tx_clone.send(WebSocketMessage::BookTicker(Arc::new(data))) {
-                            eprintln!("Failed to forward book ticker message: {}", e);
+                            websocket_log!(warn, "Failed to forward book ticker message: {}", e);
                             break;
                         }
                     }
@@ -407,7 +471,7 @@ impl WebSocketManager {
                 let result = ws_client.subscribe_book_ticker(symbol, book_ticker_tx).await;
                 
                 if let Err(e) = result {
-                    eprintln!("Book Ticker WebSocket connection failed for {}: {}", symbol, e);
+                    websocket_log!(warn, "Book ticker connection failed: {} - {}", symbol, e);
                 }
             }
             
@@ -462,7 +526,7 @@ impl WebSocketManager {
         
         if let Some((handle, _)) = conns.remove(connection_id) {
             handle.abort();
-            println!("Stopped connection: {}", connection_id);
+            system_log!(info, "Stopped connection: {}", connection_id);
         }
         
         Ok(())
@@ -474,7 +538,7 @@ impl WebSocketManager {
         
         for (connection_id, (handle, _)) in conns.drain() {
             handle.abort();
-            println!("Stopped connection: {}", connection_id);
+            system_log!(info, "Stopped connection: {}", connection_id);
         }
         
         Ok(())
@@ -554,19 +618,19 @@ pub async fn example_usage() -> Result<()> {
         while let Some(data) = rx.recv().await {
             match data {
                 WebSocketMessage::MarkPrice(mark_price) => {
-                    println!("Received mark price: {:?}", mark_price);
+                    websocket_log!(info, "Received mark price: {:?}", mark_price);
                 },
                 WebSocketMessage::Kline(kline) => {
-                    println!("Received kline: {:?}", kline);
+                    websocket_log!(info, "Received kline: {:?}", kline);
                 },
                 WebSocketMessage::PartialDepth(depth) => {
-                    println!("Received partial depth: {:?}", depth);
+                    websocket_log!(info, "Received partial depth: {:?}", depth);
                 },
                 WebSocketMessage::DiffDepth(depth) => {
-                    println!("Received diff depth: {:?}", depth);
+                    websocket_log!(info, "Received diff depth: {:?}", depth);
                 },
                 WebSocketMessage::BookTicker(book_ticker) => {
-                    println!("Received book ticker: {:?}", book_ticker);
+                    websocket_log!(info, "Received book ticker: {:?}", book_ticker);
                 },
             }
         }

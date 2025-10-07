@@ -3,8 +3,8 @@ use crate::dto::binance::websocket::{MarkPriceData, DepthUpdateData, KlineData, 
 use anyhow::Result;
 use futures::StreamExt;
 use serde_json;
-use std::time::Duration;
-use std::time::Instant;
+use crate::websocket_log;
+use std::time::{Duration, Instant};
 use tokio::sync::mpsc;
 use tokio_tungstenite::{connect_async, tungstenite::protocol::Message};
 use url::Url;
@@ -36,12 +36,12 @@ impl BinanceWebSocket {
         let stream_name = format!("{}@markPrice@{}", symbol, interval);
         let ws_url = format!("{}/{}", self.base_url, stream_name);
 
-        println!("Connecting to WebSocket: {}", ws_url);
+        websocket_log!(info, "Connecting to WebSocket: {}", ws_url);
 
         let url: Url = Url::parse(&ws_url)?;
         let (ws_stream, _) = connect_async(url).await?;
 
-        println!("✅ WebSocket connected successfully");
+        websocket_log!(info, "WebSocket connected successfully");
 
         let (_, mut read) = ws_stream.split();
 
@@ -51,21 +51,21 @@ impl BinanceWebSocket {
                 Message::Text(text) => {
                     if let Ok(data) = serde_json::from_str::<MarkPriceData>(&text) {
                         if let Err(e) = tx.send(data) {
-                            eprintln!("Failed to send message: {}", e);
+                            websocket_log!(warn, "Failed to send message: {}", e);
                             break;
                         }
                     }
                 }
                 Message::Close(_) => {
-                    println!("WebSocket connection closed");
+                    websocket_log!(info, "WebSocket connection closed");
                     break;
                 }
                 Message::Ping(_data) => {
                     // 可以在这里发送 pong 响应
-                    println!("Received ping");
+                    websocket_log!(debug, "Received ping");
                 }
                 Message::Pong(_) => {
-                    println!("Received pong");
+                    websocket_log!(debug, "Received pong");
                 }
                 _ => {
                     // 忽略其他类型的消息
@@ -96,12 +96,12 @@ impl BinanceWebSocket {
 
         let ws_url = format!("{}/{}", self.base_url, stream_name);
 
-        println!("Connecting to Depth WebSocket: {}", ws_url);
+        websocket_log!(info, "Connecting to Depth WebSocket: {}", ws_url);
 
         let url = Url::parse(&ws_url)?;
         let (ws_stream, _) = connect_async(url).await?;
 
-        println!("✅ Depth WebSocket connected successfully");
+        websocket_log!(info, "Depth WebSocket connected successfully");
 
         let (_, mut read) = ws_stream.split();
 
@@ -110,20 +110,20 @@ impl BinanceWebSocket {
                 Message::Text(text) => {
                     if let Ok(data) = serde_json::from_str::<DepthUpdateData>(&text) {
                         if let Err(e) = tx.send(data) {
-                            eprintln!("Failed to send depth message: {}", e);
+                            websocket_log!(warn, "Failed to send depth message: {}", e);
                             break;
                         }
                     }
                 }
                 Message::Close(_) => {
-                    println!("Depth WebSocket connection closed");
+                    websocket_log!(info, "Depth WebSocket connection closed");
                     break;
                 }
                 Message::Ping(_) => {
-                    println!("Received ping from depth stream");
+                    websocket_log!(debug, "Received ping from depth stream");
                 }
                 Message::Pong(_) => {
-                    println!("Received pong from depth stream");
+                    websocket_log!(debug, "Received pong from depth stream");
                 }
                 _ => {}
             }
@@ -147,12 +147,12 @@ impl BinanceWebSocket {
         let combined_stream = stream_names.join("/");
         let ws_url = format!("{}/{}", self.base_url, combined_stream);
 
-        println!("Connecting to multiple streams: {}", ws_url);
+        websocket_log!(info, "Connecting to multiple streams: {}", ws_url);
 
         let url = Url::parse(&ws_url)?;
         let (ws_stream, _) = connect_async(url).await?;
 
-        println!("✅ Multiple WebSocket streams connected successfully");
+        websocket_log!(info, "Multiple WebSocket streams connected successfully");
 
         let (_, mut read) = ws_stream.split();
 
@@ -161,20 +161,20 @@ impl BinanceWebSocket {
                 Message::Text(text) => {
                     if let Ok(data) = serde_json::from_str::<MarkPriceData>(&text) {
                         if let Err(e) = tx.send(data) {
-                            eprintln!("Failed to send message: {}", e);
+                            websocket_log!(warn, "Failed to send message: {}", e);
                             break;
                         }
                     }
                 }
                 Message::Close(_) => {
-                    println!("WebSocket connection closed");
+                    websocket_log!(info, "WebSocket connection closed");
                     break;
                 }
                 Message::Ping(_) => {
-                    println!("Received ping");
+                    websocket_log!(debug, "Received ping");
                 }
                 Message::Pong(_) => {
-                    println!("Received pong");
+                    websocket_log!(debug, "Received pong");
                 }
                 _ => {}
             }
@@ -204,12 +204,12 @@ impl BinanceWebSocket {
         let combined_stream = stream_names.join("/");
         let ws_url = format!("{}/{}", self.base_url, combined_stream);
 
-        println!("Connecting to multiple depth streams: {}", ws_url);
+        websocket_log!(info, "Connecting to multiple depth streams: {}", ws_url);
 
         let url = Url::parse(&ws_url)?;
         let (ws_stream, _) = connect_async(url).await?;
 
-        println!("✅ Multiple depth streams connected successfully");
+        websocket_log!(info, "Multiple depth streams connected successfully");
 
         let (_, mut read) = ws_stream.split();
 
@@ -218,20 +218,20 @@ impl BinanceWebSocket {
                 Message::Text(text) => {
                     if let Ok(data) = serde_json::from_str::<DepthUpdateData>(&text) {
                         if let Err(e) = tx.send(data) {
-                            eprintln!("Failed to send depth message: {}", e);
+                            websocket_log!(warn, "Failed to send depth message: {}", e);
                             break;
                         }
                     }
                 }
                 Message::Close(_) => {
-                    println!("Multiple depth streams connection closed");
+                    websocket_log!(info, "Multiple depth streams connection closed");
                     break;
                 }
                 Message::Ping(_) => {
-                    println!("Received ping from multiple depth streams");
+                    websocket_log!(debug, "Received ping from multiple depth streams");
                 }
                 Message::Pong(_) => {
-                    println!("Received pong from multiple depth streams");
+                    websocket_log!(debug, "Received pong from multiple depth streams");
                 }
                 _ => {}
             }
@@ -257,21 +257,18 @@ impl BinanceWebSocket {
                 .await
             {
                 Ok(_) => {
-                    println!("WebSocket connection completed normally");
+                    websocket_log!(info, "WebSocket connection completed normally");
                     break;
                 }
                 Err(e) => {
                     retry_count += 1;
-                    eprintln!(
-                        "WebSocket connection failed (attempt {}/{}): {}",
-                        retry_count, max_retries, e
-                    );
+                    websocket_log!(warn, "WebSocket connection failed (attempt {}/{}): {}", retry_count, max_retries, e);
 
                     if retry_count >= max_retries {
                         return Err(e);
                     }
 
-                    println!("Retrying in {:?}...", retry_delay);
+                    websocket_log!(info, "Retrying in {:?}...", retry_delay);
                     tokio::time::sleep(retry_delay).await;
                 }
             }
@@ -295,12 +292,12 @@ impl BinanceWebSocket {
         let stream_name = format!("{}@kline_{}", symbol, interval);
         let ws_url = format!("{}/{}", self.base_url, stream_name);
 
-        println!("Connecting to Kline WebSocket: {}", ws_url);
+        websocket_log!(info, "Connecting to Kline WebSocket: {}", ws_url);
 
         let url = Url::parse(&ws_url)?;
         let (ws_stream, _) = connect_async(url).await?;
 
-        println!("✅ Kline WebSocket connected successfully");
+        websocket_log!(info, "Kline WebSocket connected successfully");
 
         let (_, mut read) = ws_stream.split();
 
@@ -309,20 +306,20 @@ impl BinanceWebSocket {
                 Message::Text(text) => {
                     if let Ok(data) = serde_json::from_str::<KlineData>(&text) {
                         if let Err(e) = tx.send(data) {
-                            eprintln!("Failed to send kline message: {}", e);
+                            websocket_log!(warn, "Failed to send kline message: {}", e);
                             break;
                         }
                     }
                 }
                 Message::Close(_) => {
-                    println!("Kline WebSocket connection closed");
+                    websocket_log!(info, "Kline WebSocket connection closed");
                     break;
                 }
                 Message::Ping(_) => {
-                    println!("Received ping from kline stream");
+                    websocket_log!(debug, "Received ping from kline stream");
                 }
                 Message::Pong(_) => {
-                    println!("Received pong from kline stream");
+                    websocket_log!(debug, "Received pong from kline stream");
                 }
                 _ => {}
             }
@@ -346,12 +343,12 @@ impl BinanceWebSocket {
         let combined_stream = stream_names.join("/");
         let ws_url = format!("{}/{}", self.base_url, combined_stream);
 
-        println!("Connecting to multiple kline streams: {}", ws_url);
+        websocket_log!(info, "Connecting to multiple kline streams: {}", ws_url);
 
         let url = Url::parse(&ws_url)?;
         let (ws_stream, _) = connect_async(url).await?;
 
-        println!("✅ Multiple kline streams connected successfully");
+        websocket_log!(info, "Multiple kline streams connected successfully");
 
         let (_, mut read) = ws_stream.split();
 
@@ -360,20 +357,20 @@ impl BinanceWebSocket {
                 Message::Text(text) => {
                     if let Ok(data) = serde_json::from_str::<KlineData>(&text) {
                         if let Err(e) = tx.send(data) {
-                            eprintln!("Failed to send kline message: {}", e);
+                            websocket_log!(warn, "Failed to send kline message: {}", e);
                             break;
                         }
                     }
                 }
                 Message::Close(_) => {
-                    println!("Multiple kline streams connection closed");
+                    websocket_log!(info, "Multiple kline streams connection closed");
                     break;
                 }
                 Message::Ping(_) => {
-                    println!("Received ping from multiple kline streams");
+                    websocket_log!(debug, "Received ping from multiple kline streams");
                 }
                 Message::Pong(_) => {
-                    println!("Received pong from multiple kline streams");
+                    websocket_log!(debug, "Received pong from multiple kline streams");
                 }
                 _ => {}
             }
@@ -395,12 +392,12 @@ impl BinanceWebSocket {
         let stream_name = format!("{}@bookTicker", symbol);
         let ws_url = format!("{}/{}", self.base_url, stream_name);
 
-        println!("Connecting to Book Ticker WebSocket: {}", ws_url);
+        websocket_log!(info, "Connecting to Book Ticker WebSocket: {}", ws_url);
 
         let url = Url::parse(&ws_url)?;
         let (ws_stream, _) = connect_async(url).await?;
 
-        println!("✅ Book Ticker WebSocket connected successfully");
+        websocket_log!(info, "Book Ticker WebSocket connected successfully");
 
         let (_, mut read) = ws_stream.split();
 
@@ -409,20 +406,20 @@ impl BinanceWebSocket {
                 Message::Text(text) => {
                     if let Ok(data) = serde_json::from_str::<BookTickerData>(&text) {
                         if let Err(e) = tx.send(data) {
-                            eprintln!("Failed to send book ticker message: {}", e);
+                            websocket_log!(warn, "Failed to send book ticker message: {}", e);
                             break;
                         }
                     }
                 }
                 Message::Close(_) => {
-                    println!("Book Ticker WebSocket connection closed");
+                    websocket_log!(info, "Book Ticker WebSocket connection closed");
                     break;
                 }
                 Message::Ping(_) => {
-                    println!("Received ping from book ticker stream");
+                    websocket_log!(debug, "Received ping from book ticker stream");
                 }
                 Message::Pong(_) => {
-                    println!("Received pong from book ticker stream");
+                    websocket_log!(debug, "Received pong from book ticker stream");
                 }
                 _ => {}
             }
@@ -445,12 +442,12 @@ impl BinanceWebSocket {
         let combined_stream = stream_names.join("/");
         let ws_url = format!("{}/{}", self.base_url, combined_stream);
 
-        println!("Connecting to multiple book ticker streams: {}", ws_url);
+        websocket_log!(info, "Connecting to multiple book ticker streams: {}", ws_url);
 
         let url = Url::parse(&ws_url)?;
         let (ws_stream, _) = connect_async(url).await?;
 
-        println!("✅ Multiple book ticker streams connected successfully");
+        websocket_log!(info, "Multiple book ticker streams connected successfully");
 
         let (_, mut read) = ws_stream.split();
 
@@ -459,20 +456,20 @@ impl BinanceWebSocket {
                 Message::Text(text) => {
                     if let Ok(data) = serde_json::from_str::<BookTickerData>(&text) {
                         if let Err(e) = tx.send(data) {
-                            eprintln!("Failed to send book ticker message: {}", e);
+                            websocket_log!(warn, "Failed to send book ticker message: {}", e);
                             break;
                         }
                     }
                 }
                 Message::Close(_) => {
-                    println!("Multiple book ticker streams connection closed");
+                    websocket_log!(info, "Multiple book ticker streams connection closed");
                     break;
                 }
                 Message::Ping(_) => {
-                    println!("Received ping from multiple book ticker streams");
+                    websocket_log!(debug, "Received ping from multiple book ticker streams");
                 }
                 Message::Pong(_) => {
-                    println!("Received pong from multiple book ticker streams");
+                    websocket_log!(debug, "Received pong from multiple book ticker streams");
                 }
                 _ => {}
             }
@@ -506,7 +503,7 @@ mod tests {
         let max_messages = 5;
 
         while let Some(data) = rx.recv().await {
-            println!("Received: {:?}", data);
+            websocket_log!(info, "Received: {:?}", data);
             message_count += 1;
 
             if message_count >= max_messages {
@@ -539,8 +536,8 @@ mod tests {
         }
 
         let elapsed = start.elapsed();
-        println!("序列化 {} 次耗时: {:?}", iterations, elapsed);
-        println!("平均每次序列化: {:?}", elapsed / iterations);
+        websocket_log!(info, "序列化 {} 次耗时: {:?}", iterations, elapsed);
+        websocket_log!(info, "平均每次序列化: {:?}", elapsed / iterations);
 
         // 典型结果：每次序列化约 1-5 微秒
     }
@@ -589,7 +586,7 @@ mod tests {
         let max_messages = 3;
 
         while let Some(data) = rx.recv().await {
-            println!("收到深度数据: {}", data.symbol);
+            websocket_log!(info, "收到深度数据: {}", data.symbol);
             message_count += 1;
 
             if message_count >= max_messages {
@@ -617,7 +614,7 @@ mod tests {
         let max_messages = 3;
 
         while let Some(data) = rx.recv().await {
-            println!("收到K线数据: {} - {}", data.symbol, data.kline.interval);
+            websocket_log!(info, "收到K线数据: {} - {}", data.symbol, data.kline.interval);
             message_count += 1;
 
             if message_count >= max_messages {
@@ -646,7 +643,7 @@ mod tests {
         let max_messages = 5;
 
         while let Some(data) = rx.recv().await {
-            println!("收到多K线数据: {} - {}", data.symbol, data.kline.interval);
+            websocket_log!(info, "收到多K线数据: {} - {}", data.symbol, data.kline.interval);
             message_count += 1;
 
             if message_count >= max_messages {
@@ -673,7 +670,7 @@ mod tests {
         let max_messages = 3;
 
         while let Some(data) = rx.recv().await {
-            println!("收到Book Ticker数据: {} - 买价: {:.2}, 卖价: {:.2}", 
+            websocket_log!(info, "收到Book Ticker数据: {} - 买价: {:.2}, 卖价: {:.2}", 
                 data.symbol, data.best_bid_price, data.best_ask_price);
             message_count += 1;
 
@@ -702,7 +699,7 @@ mod tests {
         let max_messages = 5;
 
         while let Some(data) = rx.recv().await {
-            println!("收到多Book Ticker数据: {} - 价差: {:.4}", 
+            websocket_log!(info, "收到多Book Ticker数据: {} - 价差: {:.4}", 
                 data.symbol, data.spread());
             message_count += 1;
 

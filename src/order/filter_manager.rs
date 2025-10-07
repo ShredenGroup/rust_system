@@ -5,7 +5,6 @@ use anyhow::Result;
 use std::collections::HashMap;
 use std::str::FromStr;
 use tokio::sync::mpsc;
-
 // 导入日志宏
 use crate::{signal_log, order_log, error_log};
 
@@ -38,6 +37,7 @@ pub struct PositionManager {
     positions: HashMap<PositionKey, Position>,
     all_pnl: f64,
     balance: f64,
+    open_amount_ratio:HashMap<PositionKey, f64>,
 }
 
 impl PositionManager {
@@ -46,9 +46,25 @@ impl PositionManager {
             positions: HashMap::new(),
             all_pnl: 0.0,
             balance,
+            open_amount_ratio: HashMap::new(),
         }
     }
+    pub fn set_open_amount_ratio(&mut self, k: PositionKey, v: f64) {
+        self.open_amount_ratio.insert(k, v);
+    }
+    pub fn get_open_amount(&self,signal:&TradingSignal) -> Result<f64> {
+        let key = self.get_position_key_by_signal(signal)?;
+        let ratio = self.open_amount_ratio.get(&key).unwrap_or(&0.0);
+        let open_amount=ratio*self.balance;
+        Ok(open_amount)
+    }
 
+    pub fn get_position_key_by_signal(&self, signal: &TradingSignal) -> Result<PositionKey> {
+        let symbol = TradingSymbol::from_str(&signal.symbol)
+        .map_err(|_| anyhow::anyhow!("Invalid symbol: {}", signal.symbol))?;
+        let key = PositionKey::new(signal.exchange(), symbol, signal.strategy);
+        Ok(key)
+    }
     pub fn set_position(&mut self, k: PositionKey, v: Position) {
         self.positions.insert(k, v);
     }
@@ -107,7 +123,6 @@ impl PositionManager {
         self.get_position_quantity(key)
     }
 }
-
 pub struct SignalManager {
     pub position_manager: PositionManager,
     pub signal_receiver: mpsc::Receiver<TradingSignal>,
@@ -776,7 +791,6 @@ mod tests {
             panic!("测试失败：{}", error);
         }
     }
-
     #[tokio::test]
     async fn test_process_signals_close_position_failure_rollback() {
         // 加载用户配置

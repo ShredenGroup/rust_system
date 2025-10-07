@@ -12,7 +12,11 @@ pub trait Strategy<T>: Send + Sync {
     fn on_kline_update(&mut self, input: T) -> Self::Output;
     fn name(&self) -> String;
 }
-
+pub trait OrderBookStrategy<T>:Send + Sync{
+    type Output;
+    fn on_orderbook_update(&mut self, input: T) -> Self::Output;
+    fn name(&self) -> String;
+}
 pub trait IsClosed {
     fn is_closed(&self) -> bool;
 }

@@ -468,7 +468,9 @@ impl BinanceFuturesApi {
     /// * `Result<BatchOrderResult>` - 批量订单结果
     /// 
     /// # 重试策略
+    /// - 只有错误码为1008的订单才会重试
     /// - 最多重试3次
+    /// - 其他错误码的订单不会重试
     /// - 如果所有重试都失败，触发熔断机制
     pub async fn batch_orders_with_retry(
         &self,
@@ -477,66 +479,88 @@ impl BinanceFuturesApi {
     ) -> Result<BatchOrderResult> {
         let mut result = self.batch_orders(orders.clone(), recv_window).await?;
         
-        // 如果有失败的订单，进行重试
+        // 如果有失败的订单，检查是否需要重试（只有错误码1008才重试）
         if !result.failed_orders.is_empty() {
-            order_log!(warn, "🔄 开始重试失败的订单: {}/{} 个订单需要重试", 
-                result.failed_orders.len(), orders.len());
+            // 检查是否有错误码为1008的失败订单
+            let mut retryable_indices: Vec<usize> = result.failed_orders
+                .iter()
+                .filter(|(_, error)| error.code == 1008)
+                .map(|(index, _)| *index)
+                .collect();
             
-            // 重试3次
-            for retry_attempt in 1..=3 {
-                if result.failed_orders.is_empty() {
-                    break; // 没有失败的订单了，停止重试
-                }
+            if !retryable_indices.is_empty() {
+                order_log!(warn, "🔄 开始重试失败的订单: {}/{} 个订单需要重试（错误码1008）", 
+                    retryable_indices.len(), result.failed_orders.len());
                 
-                order_log!(info, "🔄 第{}次重试: {} 个失败订单", retry_attempt, result.failed_orders.len());
-                
-                // 准备重试的订单
-                let mut retry_orders = Vec::new();
-                let mut retry_indices = Vec::new();
-                
-                for (original_index, _error) in &result.failed_orders {
-                    if let Some(order) = orders.get(*original_index) {
-                        retry_orders.push(order.clone());
-                        retry_indices.push(*original_index);
+                // 重试3次
+                for retry_attempt in 1..=3 {
+                    if retryable_indices.is_empty() {
+                        break; // 没有需要重试的订单了，停止重试
                     }
-                }
-                
-                // 执行重试
-                let retry_result = self.batch_orders(retry_orders, recv_window).await;
-                
-                match retry_result {
-                    Ok(retry_result) => {
-                        // 清空之前的失败订单
-                        result.failed_orders.clear();
-                        
-                        // 先计算统计信息
-                        let success_count = retry_result.successful_orders.len();
-                        let failure_count = retry_result.failed_orders.len();
-                        
-                        // 处理重试结果
-                        for order in retry_result.successful_orders {
-                            result.add_success(order);
+                    
+                    order_log!(info, "🔄 第{}次重试: {} 个失败订单（错误码1008）", retry_attempt, retryable_indices.len());
+                    
+                    // 准备重试的订单（只重试错误码1008的订单）
+                    let mut retry_orders = Vec::new();
+                    let mut retry_indices = Vec::new();
+                    
+                    for original_index in &retryable_indices {
+                        if let Some(order) = orders.get(*original_index) {
+                            retry_orders.push(order.clone());
+                            retry_indices.push(*original_index);
                         }
-                        
-                        for (original_index, error) in &retry_result.failed_orders {
-                            result.add_failure(*original_index, error.clone());
-                        }
-                        
-                        order_log!(info, "✅ 第{}次重试完成: 成功{}, 失败{}", 
-                            retry_attempt, success_count, failure_count);
                     }
-                    Err(e) => {
-                        order_log!(error, "💥 第{}次重试失败: {}", retry_attempt, e);
-                        
-                        // 检查是否应该触发熔断
-                        if retry_attempt == 3 {
-                            order_log!(error, "🚨 触发熔断机制: 重试3次都失败，关闭系统");
+                    
+                    // 执行重试
+                    let retry_result = self.batch_orders(retry_orders, recv_window).await;
+                    
+                    match retry_result {
+                        Ok(retry_result) => {
+                            // 先计算统计信息
+                            let success_count = retry_result.successful_orders.len();
+                            let failure_count = retry_result.failed_orders.len();
                             
-                            // 触发熔断，关闭整个进程
-                            std::process::exit(1);
+                            // 处理重试结果
+                            for order in retry_result.successful_orders {
+                                result.add_success(order);
+                            }
+                            
+                            // 更新重试列表：移除成功的订单
+                            let mut new_retryable_indices = Vec::new();
+                            for (retry_index, original_index) in retry_indices.iter().enumerate() {
+                                if retry_index < success_count {
+                                    // 这个订单成功了，从重试列表中移除
+                                    continue;
+                                } else {
+                                    // 这个订单仍然失败，保留在重试列表中
+                                    new_retryable_indices.push(*original_index);
+                                }
+                            }
+                            retryable_indices = new_retryable_indices;
+                            
+                            // 添加新的失败订单到结果中
+                            for (original_index, error) in &retry_result.failed_orders {
+                                result.add_failure(*original_index, error.clone());
+                            }
+                            
+                            order_log!(info, "✅ 第{}次重试完成: 成功{}, 失败{}", 
+                                retry_attempt, success_count, failure_count);
+                        }
+                        Err(e) => {
+                            order_log!(error, "💥 第{}次重试失败: {}", retry_attempt, e);
+                            
+                            // 检查是否应该触发熔断
+                            if retry_attempt == 3 {
+                                order_log!(error, "🚨 触发熔断机制: 重试3次都失败，关闭系统");
+                                
+                                // 触发熔断，关闭整个进程
+                                std::process::exit(1);
+                            }
                         }
                     }
                 }
+            } else {
+                order_log!(info, "ℹ️ 没有需要重试的订单（错误码1008），其他错误码不进行重试");
             }
         }
         
@@ -710,7 +734,6 @@ impl BinanceFuturesApi {
 
         // 先获取状态码，因为 text() 会移动 response
         let status = response.status();
-        
         // 检查响应状态
         if !status.is_success() {
             let error_text = response.text().await?;

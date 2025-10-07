@@ -92,7 +92,7 @@ impl SimpleLoggingManager {
             .add_directive("orders=info".parse().unwrap());
         
         let websocket_filter = EnvFilter::new("off")
-            .add_directive("websocket=warn".parse().unwrap());
+            .add_directive("websocket=info".parse().unwrap());
 
         // 创建各层的格式化器
         let main_layer = fmt::layer()

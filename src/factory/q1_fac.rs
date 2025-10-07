@@ -182,12 +182,7 @@ impl Q1Factory {
             
             // 添加策略到管理器（会自动设置symbol）
             strategy_manager.add_strategy(symbol.clone(), strategy_enum).await?;
-            info!("   ✅ {} - Q1策略配置完成", symbol.as_str());
-            info!("      • 突破周期: {}", break_period);
-            info!("      • EMA周期: {}", ema_period);
-            info!("      • 止盈周期: {}", profit_period);
-            info!("      • ATR周期: {}", atr_period);
-            info!("      • ATR倍数: {:.1}", atr_multiplier);
+
         }
 
         // 启动策略管理器任务
@@ -307,10 +302,6 @@ impl Q1Factory {
 
             // 性能统计已移除，减少日志冗余
         }
-
-        info!("🏁 多币种Q1策略结束");
-        info!("最终统计: 总消息数={}", message_count);
-
         // 等待所有任务完成
         info!("⏳ 等待所有任务完成...");
         

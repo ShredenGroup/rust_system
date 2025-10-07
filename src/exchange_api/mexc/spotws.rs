@@ -6,7 +6,7 @@ use tokio_tungstenite::{connect_async, tungstenite::protocol::Message as WsMessa
 use url::Url;
 
 // 导入 MEXC 的 protobuf 结构体和 Message trait
-use crate::dto::mexc::websocket::PushDataV3ApiWrapper;
+use crate::dto::mexc::PushDataV3ApiWrapper;
 use prost::Message as ProstMessage; // 重命名
 use crate::common::ts::BookTickerData;
 
@@ -82,9 +82,12 @@ impl MexcWebSocket {
                     // 尝试解析 MEXC 官方 protobuf 结构
                     match PushDataV3ApiWrapper::decode(&*data) {
                         Ok(wrapper) => {
+                            println!("✅ 解析成功: {} | 消息类型: {}", 
+                                wrapper.channel, wrapper.get_message_type());
+                            
                             if let Some(kline) = wrapper.extract_kline_data() {
-                                println!("✅ 解析成功: {} | 开盘: {} | 收盘: {} | 最高: {} | 最低: {} | 成交量: {}", 
-                                    wrapper.channel, kline.opening_price, kline.closing_price, 
+                                println!("📊 K线数据: 开盘: {} | 收盘: {} | 最高: {} | 最低: {} | 成交量: {}", 
+                                    kline.opening_price, kline.closing_price, 
                                     kline.highest_price, kline.lowest_price, kline.volume);
                                 
                                 // 转换为 JSON 格式发送到通道
@@ -108,7 +111,7 @@ impl MexcWebSocket {
                                     break;
                                 }
                             } else {
-                                eprintln!("❌ 包装器中没有K线数据");
+                                println!("ℹ️ 未找到 K线数据，消息类型: {}", wrapper.get_message_type());
                             }
                         }
                         Err(e) => {
@@ -201,9 +204,11 @@ impl MexcWebSocket {
                     // 尝试解析 MEXC 官方 protobuf 结构
                     match PushDataV3ApiWrapper::decode(&*data) {
                         Ok(wrapper) => {
+                            println!("✅ 成交解析成功: {} | 消息类型: {}", 
+                                wrapper.channel, wrapper.get_message_type());
+                            
                             if let Some(deals) = wrapper.extract_deals_data() {
-                                println!("✅ 成交解析成功: {} | 成交笔数: {}", 
-                                    wrapper.channel, deals.deals.len());
+                                println!("📈 成交数据: 成交笔数: {}", deals.deals.len());
                                 
                                 // 处理每笔成交
                                 for deal in &deals.deals {
@@ -235,7 +240,7 @@ impl MexcWebSocket {
                                     }
                                 }
                             } else {
-                                eprintln!("❌ 包装器中没有成交数据");
+                                println!("ℹ️ 未找到成交数据，消息类型: {}", wrapper.get_message_type());
                             }
                         }
                         Err(e) => {
@@ -307,14 +312,14 @@ impl MexcWebSocket {
         tokio::spawn(async move {
             while let Some(msg) = read.next().await {
                 match msg {
-                    Ok(WsMessage::Text(text)) => {
+                    Ok(WsMessage::Text(_text)) => {
                         // 对于文本消息，我们只记录日志，不发送到通道
                     }
                     Ok(WsMessage::Binary(data)) => {
                         // 尝试解析 MEXC 官方 protobuf 结构
                         match PushDataV3ApiWrapper::decode(&*data) {
                             Ok(wrapper) => {
-                                if let Some(book_ticker) = wrapper.extract_book_ticker_data() {
+                                if let Some(_book_ticker) = wrapper.extract_book_ticker_data() {
                                     // 直接发送 wrapper 到通道，不打印任何信息
                                     if let Err(e) = tx_clone.send(wrapper).await {
                                         eprintln!("❌ 发送 Book Ticker 数据到通道失败: {}", e);
@@ -347,6 +352,254 @@ impl MexcWebSocket {
         });
 
         Ok(rx)
+    }
+
+    /// 订阅深度数据 (Partial Book Depth Streams)
+    ///
+    /// # Arguments
+    /// * `symbol` - 交易对符号，如 "BTCUSDT" (必须大写)
+    /// * `level` - 深度级别，可以是 5, 10, 或 20
+    /// * `tx` - 消息发送通道
+    pub async fn subscribe_depth(
+        &self,
+        symbol: &str,
+        level: u32,
+        tx: mpsc::UnboundedSender<String>,
+    ) -> anyhow::Result<()> {
+        let ws_url = self.base_url.clone();
+        println!("Connecting to MEXC WebSocket for depth: {}", ws_url);
+
+        let url: Url = Url::parse(&ws_url)?;
+        let (ws_stream, _) = connect_async(url).await?;
+
+        println!("✅ MEXC WebSocket connected successfully for depth");
+
+        let (mut write, mut read) = ws_stream.split();
+
+        // 发送订阅请求
+        let subscribe_msg = serde_json::json!({
+            "method": "SUBSCRIPTION",
+            "params": [
+                format!("spot@public.limit.depth.v3.api.pb@{}@{}", symbol.to_uppercase(), level)
+            ]
+        });
+
+        let subscribe_text = subscribe_msg.to_string();
+        println!("📤 发送深度订阅请求: {}", subscribe_text);
+        
+        let msg = WsMessage::Text(subscribe_text);
+        write.send(msg).await?;
+
+        // 处理接收到的消息
+        while let Some(msg) = read.next().await {
+            match msg? {
+                WsMessage::Text(text) => {
+                    println!("📥 收到深度文本消息: {}", text);
+                    
+                    // 检查是否是订阅响应
+                    if let Ok(response) = serde_json::from_str::<serde_json::Value>(&text) {
+                        if let Some(method) = response.get("method") {
+                            if method == "SUBSCRIPTION" {
+                                println!("✅ 深度订阅成功: {}", text);
+                            }
+                        }
+                    }
+                }
+                WsMessage::Binary(data) => {
+                    println!("📊 收到深度二进制数据(protobuf)，长度: {}", data.len());
+                    
+                    // 尝试解析 MEXC 官方 protobuf 结构
+                    match PushDataV3ApiWrapper::decode(&*data) {
+                        Ok(wrapper) => {
+                            println!("✅ 深度解析成功: {} | 消息类型: {}", 
+                                wrapper.channel, wrapper.get_message_type());
+                            
+                            if let Some(depth) = wrapper.extract_limit_depth_data() {
+                                println!("📊 深度数据: 买单数量: {} | 卖单数量: {} | 版本: {}", 
+                                    depth.bids.len(), depth.asks.len(), depth.version);
+                                
+                                // 转换为 JSON 格式发送到通道
+                                let symbol_name = wrapper.symbol.clone().unwrap_or_else(|| symbol.to_uppercase());
+                                let json_data = serde_json::json!({
+                                    "symbol": symbol_name,
+                                    "level": level,
+                                    "bids": depth.bids.iter().map(|bid| {
+                                        serde_json::json!({
+                                            "price": bid.price.parse::<f64>().unwrap_or(0.0),
+                                            "quantity": bid.quantity.parse::<f64>().unwrap_or(0.0)
+                                        })
+                                    }).collect::<Vec<_>>(),
+                                    "asks": depth.asks.iter().map(|ask| {
+                                        serde_json::json!({
+                                            "price": ask.price.parse::<f64>().unwrap_or(0.0),
+                                            "quantity": ask.quantity.parse::<f64>().unwrap_or(0.0)
+                                        })
+                                    }).collect::<Vec<_>>(),
+                                    "version": depth.version,
+                                    "event_type": depth.event_type,
+                                    "send_time": wrapper.send_time.unwrap_or(0),
+                                    "timestamp": chrono::Utc::now().timestamp()
+                                });
+                                
+                                if let Err(e) = tx.send(json_data.to_string()) {
+                                    eprintln!("Failed to send depth message: {}", e);
+                                    break;
+                                }
+                            } else {
+                                println!("ℹ️ 未找到深度数据，消息类型: {}", wrapper.get_message_type());
+                            }
+                        }
+                        Err(e) => {
+                            eprintln!("❌ 深度数据 Protobuf 解析失败: {}", e);
+                            // 如果解析失败，发送原始十六进制数据用于调试
+                            let hex_data = hex::encode(&data);
+                            if let Err(e) = tx.send(format!("DEPTH_PARSE_ERROR:{}", hex_data)) {
+                                eprintln!("Failed to send error message: {}", e);
+                                break;
+                            }
+                        }
+                    }
+                }
+                WsMessage::Close(_) => {
+                    eprintln!("❌ MEXC WebSocket connection closed");
+                    break;
+                }
+                WsMessage::Ping(data) => {
+                    println!("🏓 收到 Ping，发送 Pong 响应");
+                    let pong_msg = WsMessage::Pong(data);
+                    if let Err(e) = write.send(pong_msg).await {
+                        eprintln!("Failed to send pong: {}", e);
+                        break;
+                    }
+                }
+                WsMessage::Pong(_) => {
+                    println!("🏓 收到 Pong");
+                }
+                _ => {}
+            }
+        }
+
+        Ok(())
+    }
+
+    /// 订阅多个交易对的深度数据
+    pub async fn subscribe_multiple_depths(
+        &self,
+        subscriptions: Vec<(String, u32)>, // (symbol, level)
+        tx: mpsc::UnboundedSender<String>,
+    ) -> anyhow::Result<()> {
+        let ws_url = self.base_url.clone();
+        println!("Connecting to MEXC WebSocket for multiple depth subscriptions: {}", ws_url);
+
+        let url: Url = Url::parse(&ws_url)?;
+        let (ws_stream, _) = connect_async(url).await?;
+
+        println!("✅ MEXC WebSocket connected successfully for multiple depth subscriptions");
+
+        let (mut write, mut read) = ws_stream.split();
+
+        // 发送多个订阅请求
+        for (symbol, level) in &subscriptions {
+            let subscribe_msg = serde_json::json!({
+                "method": "SUBSCRIPTION",
+                "params": [
+                    format!("spot@public.limit.depth.v3.api.pb@{}@{}", symbol.to_uppercase(), level)
+                ]
+            });
+
+            let subscribe_text = subscribe_msg.to_string();
+            println!("📤 发送深度订阅请求: {} - Level {}", symbol, level);
+            
+            let msg = WsMessage::Text(subscribe_text);
+            write.send(msg).await?;
+            
+            // 短暂延迟，避免请求过快
+            tokio::time::sleep(Duration::from_millis(100)).await;
+        }
+
+        // 处理接收到的消息
+        while let Some(msg) = read.next().await {
+            match msg? {
+                WsMessage::Text(text) => {
+                    println!("📥 收到多深度文本消息: {}", text);
+                    
+                    // 发送到通道
+                    if let Err(e) = tx.send(text.clone()) {
+                        eprintln!("Failed to send message: {}", e);
+                        break;
+                    }
+                }
+                WsMessage::Binary(data) => {
+                    println!("📊 收到多深度二进制数据(protobuf)，长度: {}", data.len());
+                    
+                    // 尝试解析 MEXC 官方 protobuf 结构
+                    match PushDataV3ApiWrapper::decode(&*data) {
+                        Ok(wrapper) => {
+                            if let Some(depth) = wrapper.extract_limit_depth_data() {
+                                println!("📊 收到多深度数据: {} | 买单: {} | 卖单: {} | 版本: {}", 
+                                    wrapper.channel, depth.bids.len(), depth.asks.len(), depth.version);
+                                
+                                // 转换为 JSON 格式发送到通道
+                                let symbol_name = wrapper.symbol.clone().unwrap_or_else(|| "UNKNOWN".to_string());
+                                let json_data = serde_json::json!({
+                                    "symbol": symbol_name,
+                                    "bids": depth.bids.iter().map(|bid| {
+                                        serde_json::json!({
+                                            "price": bid.price.parse::<f64>().unwrap_or(0.0),
+                                            "quantity": bid.quantity.parse::<f64>().unwrap_or(0.0)
+                                        })
+                                    }).collect::<Vec<_>>(),
+                                    "asks": depth.asks.iter().map(|ask| {
+                                        serde_json::json!({
+                                            "price": ask.price.parse::<f64>().unwrap_or(0.0),
+                                            "quantity": ask.quantity.parse::<f64>().unwrap_or(0.0)
+                                        })
+                                    }).collect::<Vec<_>>(),
+                                    "version": depth.version,
+                                    "event_type": depth.event_type,
+                                    "send_time": wrapper.send_time.unwrap_or(0),
+                                    "timestamp": chrono::Utc::now().timestamp()
+                                });
+                                
+                                if let Err(e) = tx.send(json_data.to_string()) {
+                                    eprintln!("Failed to send depth message: {}", e);
+                                    break;
+                                }
+                            } else {
+                                println!("ℹ️ 未找到多深度数据，消息类型: {}", wrapper.get_message_type());
+                            }
+                        }
+                        Err(e) => {
+                            eprintln!("❌ 多深度数据 Protobuf 解析失败: {}", e);
+                            // 如果解析失败，发送原始十六进制数据用于调试
+                            let hex_data = hex::encode(&data);
+                            if let Err(e) = tx.send(format!("MULTI_DEPTH_PARSE_ERROR:{}", hex_data)) {
+                                eprintln!("Failed to send error message: {}", e);
+                                break;
+                            }
+                        }
+                    }
+                }
+                WsMessage::Close(_) => {
+                    eprintln!("❌ MEXC WebSocket connection closed");
+                    break;
+                }
+                WsMessage::Ping(data) => {
+                    println!("🏓 收到 Ping，发送 Pong 响应");
+                    let pong_msg = WsMessage::Pong(data);
+                    if let Err(e) = write.send(pong_msg).await {
+                        eprintln!("Failed to send pong: {}", e);
+                        break;
+                    }
+                }
+                WsMessage::Pong(_) => {
+                    println!("🏓 收到 Pong");
+                }
+                _ => {}
+            }
+        }
+
+        Ok(())
     }
 
     /// 订阅多个交易对的 Book Ticker 数据
@@ -401,7 +654,7 @@ impl MexcWebSocket {
                     // 尝试解析 MEXC 官方 protobuf 结构
                     match PushDataV3ApiWrapper::decode(&*data) {
                         Ok(wrapper) => {
-                            if let Some(book_ticker) = wrapper.extract_book_ticker_data() {
+                            if let Some(_book_ticker) = wrapper.extract_book_ticker_data() {
                                 println!("📊 收到多 Book Ticker 数据: {} | 价差: {:.8} | 中间价: {:.8}", 
                                     wrapper.channel, wrapper.spread(), wrapper.mid_price());
                                 
@@ -658,6 +911,68 @@ mod tests {
                 break;
             }
         }
+    }
+
+    #[tokio::test]
+    async fn test_depth_subscription() {
+        let ws = MexcWebSocket::new();
+        let (tx, mut rx) = mpsc::unbounded_channel();
+
+        // 启动深度 WebSocket 连接
+        let symbol = "BTCUSDT";
+        let level = 5;
+
+        let ws_handle = tokio::spawn(async move { 
+            ws.subscribe_depth(symbol, level, tx).await 
+        });
+
+        // 接收几条消息
+        let mut message_count = 0;
+        let max_messages = 5;
+
+        while let Some(data) = rx.recv().await {
+            println!("Received Depth: {}", data);
+            message_count += 1;
+
+            if message_count >= max_messages {
+                break;
+            }
+        }
+
+        // 等待 WebSocket 任务完成
+        let _ = ws_handle.await;
+    }
+
+    #[tokio::test]
+    async fn test_multiple_depths_subscription() {
+        let ws = MexcWebSocket::new();
+        let (tx, mut rx) = mpsc::unbounded_channel();
+
+        // 订阅多个交易对的深度数据
+        let subscriptions = vec![
+            ("BTCUSDT".to_string(), 5),
+            ("ETHUSDT".to_string(), 10),
+        ];
+
+        let ws_handle = tokio::spawn(async move { 
+            ws.subscribe_multiple_depths(subscriptions, tx).await 
+        });
+
+        // 接收几条消息
+        let mut message_count = 0;
+        let max_messages = 10;
+
+        while let Some(data) = rx.recv().await {
+            println!("Received Multiple Depth: {}", data);
+            message_count += 1;
+
+            if message_count >= max_messages {
+                break;
+            }
+        }
+
+        // 等待 WebSocket 任务完成
+        let _ = ws_handle.await;
     }
 
     #[tokio::test]
