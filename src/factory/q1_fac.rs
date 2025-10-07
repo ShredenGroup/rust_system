@@ -187,14 +187,12 @@ impl Q1Factory {
 
         // 启动策略管理器任务
         let strategy_manager_handle = tokio::spawn(async move {
-            info!("🚀 启动策略管理器任务");
             if let Err(e) = strategy_manager.run().await {
                 error!("❌ 策略管理器运行失败: {}", e);
             }
         });
 
         // 获取所有币种的历史K线数据进行初始化
-        info!("📊 获取历史K线数据进行初始化...");
         for symbol in &trading_symbols {
             info!("   📈 获取 {} 历史数据", symbol.as_str());
             api_manager.get_history_klines(

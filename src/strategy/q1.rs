@@ -205,6 +205,31 @@ impl Q1Strategy {
 
         None
     }
+
+    /// 打印当前信号状态
+    fn print_signal_status(&self, close_price: f64, max_profit: f64, min_profit: f64) {
+        let signal_status = match self.current_signal {
+            0 => "无持仓",
+            1 => "多头持仓",
+            2 => "空头持仓",
+            _ => "未知状态",
+        };
+
+        let stop_price_str = match self.last_stop_price {
+            Some(price) => format!("{:.8}", price),
+            None => "未设置".to_string(),
+        };
+
+        signal_log!(info, 
+            "📊 Q1策略状态 - 交易对: {}, 收盘价: {:.8}, 信号状态: {}, 止损价: {}, 止盈高点: {:.8}, 止盈低点: {:.8}",
+            self.symbol.as_str(),
+            close_price,
+            signal_status,
+            stop_price_str,
+            max_profit,
+            min_profit
+        );
+    }
 }
 
 impl<T> Strategy<&T> for Q1Strategy
@@ -246,6 +271,9 @@ where
                     max_break, min_break, ema_value, max_profit, min_profit, atr_value
                 );
 
+                // K线结束后打印当前信号状态
+                self.print_signal_status(close_price, max_profit, min_profit);
+
                 self.last_price = close_price;
                 signal
             } else {
@@ -272,7 +300,6 @@ where
                 self.min_profit.next(input);
                 let atr_value = self.atr.next(input);
                 self.count += 1;
-                println!("Q1策略初始化中: {}/240", self.count);
                 
                 if self.count == 240 {
                     self.finish_init = true;
@@ -291,7 +318,6 @@ where
                     self.last_lower_break = min_break;
                     self.last_max_profit = max_profit;
                     self.last_min_profit = min_profit;
-                    println!("Q1策略初始化完成，开始正常运行");
                 }
             }
             None
@@ -465,6 +491,57 @@ mod tests {
         }
     }
     
+    #[test]
+    fn test_q1_strategy_signal_status_printing() {
+        let mut strategy = Q1Strategy::default().unwrap();
+        let test_klines = create_test_klines();
+        
+        // 初始化策略
+        for kline in test_klines.iter().take(240) {
+            strategy.on_kline_update(kline);
+        }
+        
+        // 获取最后一个初始化K线的价格作为基准
+        let last_price = test_klines.last().unwrap().close;
+        
+        // 创建一个突破性的K线来开多仓
+        // 需要确保突破35周期高点且价格在EMA上方
+        let breakthrough_kline = MockKlineData::new(
+            last_price * 1.02,             // open: 高于前收盘
+            last_price * 1.10,             // high: 显著突破前高（增加突破幅度）
+            last_price * 1.015,            // low: 保持在较高水平
+            last_price * 1.08,             // close: 收在高位（确保在EMA上方）
+            true
+        );
+        
+        // 这个K线应该触发开多信号
+        let signal = strategy.on_kline_update(&breakthrough_kline);
+        
+        // 如果信号生成失败，打印调试信息
+        if signal.is_none() {
+            println!("调试信息:");
+            println!("  当前价格: {:.8}", breakthrough_kline.close());
+            println!("  最高价: {:.8}", breakthrough_kline.high());
+            println!("  最低价: {:.8}", breakthrough_kline.low());
+            println!("  突破高点: {:.8}", strategy.last_upper_break);
+            println!("  EMA值: {:.8}", strategy.last_ema);
+            println!("  前一根K线高点: {:.8}", strategy.prev_high);
+            println!("  突破条件1 (high > max_break): {}", breakthrough_kline.high() > strategy.last_upper_break);
+            println!("  突破条件2 (prev_high < max_break): {}", strategy.prev_high < strategy.last_upper_break);
+            println!("  突破条件3 (close > ema): {}", breakthrough_kline.close() > strategy.last_ema);
+        }
+        
+        assert!(signal.is_some(), "应该生成开多信号");
+        assert_eq!(strategy.current_signal, 1, "应该开多仓");
+        
+        // 验证状态信息
+        assert!(strategy.last_stop_price.is_some(), "止损价应该被设置");
+        assert!(strategy.last_max_profit > 0.0, "止盈高点应该被计算");
+        assert!(strategy.last_min_profit > 0.0, "止盈低点应该被计算");
+        
+        println!("✅ Q1策略信号状态打印功能测试通过");
+    }
+
     #[test]
     fn test_q1_strategy_profit_taking() {
         let mut strategy = Q1Strategy::default().unwrap();
