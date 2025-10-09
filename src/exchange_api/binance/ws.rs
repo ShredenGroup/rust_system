@@ -56,8 +56,13 @@ impl BinanceWebSocket {
                         }
                     }
                 }
-                Message::Close(_) => {
-                    websocket_log!(info, "WebSocket connection closed");
+                Message::Close(close_frame) => {
+                    if let Some(frame) = close_frame {
+                        websocket_log!(warn, "WebSocket closed with code: {:?}, reason: {}", 
+                            frame.code, frame.reason);
+                    } else {
+                        websocket_log!(warn, "WebSocket connection closed without close frame (likely network issue)");
+                    }
                     break;
                 }
                 Message::Ping(_data) => {
@@ -166,8 +171,13 @@ impl BinanceWebSocket {
                         }
                     }
                 }
-                Message::Close(_) => {
-                    websocket_log!(info, "WebSocket connection closed");
+                Message::Close(close_frame) => {
+                    if let Some(frame) = close_frame {
+                        websocket_log!(warn, "WebSocket closed with code: {:?}, reason: {}", 
+                            frame.code, frame.reason);
+                    } else {
+                        websocket_log!(warn, "WebSocket connection closed without close frame (likely network issue)");
+                    }
                     break;
                 }
                 Message::Ping(_) => {
@@ -311,8 +321,13 @@ impl BinanceWebSocket {
                         }
                     }
                 }
-                Message::Close(_) => {
-                    websocket_log!(info, "Kline WebSocket connection closed");
+                Message::Close(close_frame) => {
+                    if let Some(frame) = close_frame {
+                        websocket_log!(warn, "Kline WebSocket closed with code: {:?}, reason: {}", 
+                            frame.code, frame.reason);
+                    } else {
+                        websocket_log!(warn, "Kline WebSocket connection closed without close frame (likely network issue)");
+                    }
                     break;
                 }
                 Message::Ping(_) => {
@@ -356,14 +371,20 @@ impl BinanceWebSocket {
             match msg? {
                 Message::Text(text) => {
                     if let Ok(data) = serde_json::from_str::<KlineData>(&text) {
+                        println!("Received kline data: {:?}", data);
                         if let Err(e) = tx.send(data) {
                             websocket_log!(warn, "Failed to send kline message: {}", e);
                             break;
                         }
                     }
                 }
-                Message::Close(_) => {
-                    websocket_log!(info, "Multiple kline streams connection closed");
+                Message::Close(close_frame) => {
+                    if let Some(frame) = close_frame {
+                        websocket_log!(warn, "Multiple kline streams closed with code: {:?}, reason: {}", 
+                            frame.code, frame.reason);
+                    } else {
+                        websocket_log!(warn, "Multiple kline streams connection closed without close frame (likely network issue)");
+                    }
                     break;
                 }
                 Message::Ping(_) => {
@@ -373,6 +394,76 @@ impl BinanceWebSocket {
                     websocket_log!(debug, "Received pong from multiple kline streams");
                 }
                 _ => {}
+            }
+        }
+
+        Ok(())
+    }
+
+    /// 带重试机制的单个 Kline 订阅
+    pub async fn subscribe_kline_with_reconnect(
+        &self,
+        symbol: &str,
+        interval: &str,
+        tx: mpsc::UnboundedSender<KlineData>,
+        max_retries: usize,
+        retry_delay: Duration,
+    ) -> Result<()> {
+        let mut retry_count = 0;
+
+        loop {
+            match self.subscribe_kline(symbol, interval, tx.clone()).await {
+                Ok(_) => {
+                    websocket_log!(info, "Kline WebSocket connection completed normally");
+                    break;
+                }
+                Err(e) => {
+                    retry_count += 1;
+                    websocket_log!(warn, "Kline WebSocket connection failed (attempt {}/{}): {}", 
+                        retry_count, max_retries, e);
+
+                    if retry_count >= max_retries {
+                        return Err(e);
+                    }
+
+                    websocket_log!(info, "Retrying Kline connection in {:?}...", retry_delay);
+                    tokio::time::sleep(retry_delay).await;
+                }
+            }
+        }
+
+        Ok(())
+    }
+
+    /// 带重试机制的多个 Kline 订阅
+    pub async fn subscribe_multiple_klines_with_reconnect(
+        &self,
+        symbols: &[String],
+        interval: &str,
+        tx: mpsc::UnboundedSender<KlineData>,
+        max_retries: usize,
+        retry_delay: Duration,
+    ) -> Result<()> {
+        let mut retry_count = 0;
+
+        loop {
+            match self.subscribe_multiple_klines(symbols, interval, tx.clone()).await {
+                Ok(_) => {
+                    websocket_log!(info, "Multiple Kline WebSocket connection completed normally");
+                    break;
+                }
+                Err(e) => {
+                    retry_count += 1;
+                    websocket_log!(warn, "Multiple Kline WebSocket connection failed (attempt {}/{}): {}", 
+                        retry_count, max_retries, e);
+
+                    if retry_count >= max_retries {
+                        return Err(e);
+                    }
+
+                    websocket_log!(info, "Retrying Multiple Kline connection in {:?}...", retry_delay);
+                    tokio::time::sleep(retry_delay).await;
+                }
             }
         }
 

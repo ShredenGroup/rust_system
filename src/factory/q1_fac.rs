@@ -19,13 +19,11 @@ use crate::{
 use tokio;
 use anyhow::Result;
 
-use tracing::{info, debug, error};
+use tracing::{info, error};
 use std::sync::Arc;
 use tokio::sync::mpsc;
 use crate::dto::unified::UnifiedKlineData;
 
-// 导入日志宏
-use crate::websocket_log;
 
 /// Q1策略工厂
 pub struct Q1Factory;
@@ -49,7 +47,6 @@ impl Q1Factory {
     /// 运行Q1策略
     pub async fn run_q1_strategy() -> Result<()> {
         info!("🚀 启动Q1策略");
-        info!("{}", "=".repeat(80));
 
         // 定义要交易的币种
         let trading_symbols = vec![
@@ -62,14 +59,10 @@ impl Q1Factory {
             TradingSymbol::SOLUSDT,   // Solana
         ];
         
-        info!("📊 交易币种列表:");
-        for symbol in &trading_symbols {
-            info!("   • {}", symbol.as_str());
-        }
+        info!("📊 交易币种: {} 个", trading_symbols.len());
 
         // 加载API配置
         let user_config = load_binance_user_config()?;
-        info!("✅ 已加载用户配置");
 
         // 创建信号处理通道
         let (signal_tx, signal_rx) = mpsc::channel(1000);
@@ -80,7 +73,6 @@ impl Q1Factory {
             user_config.api_key.clone(),
             user_config.secret_key.clone(),
         ).await?;
-        info!("✅ API管理器创建成功");
 
         // 从API管理器获取共享的BinanceFuturesApi实例
         let shared_api_client = api_manager.get_api_client();
@@ -91,11 +83,9 @@ impl Q1Factory {
             position_manager,
             shared_api_client,
         );
-        info!("✅ 信号管理器创建成功（使用共享API实例）");
 
         // 启动信号处理任务
         let signal_manager_handle = tokio::spawn(async move {
-            info!("🚀 启动信号处理任务");
             if let Err(e) = signal_manager.process_signals().await {
                 eprintln!("❌ 信号处理任务失败: {}", e);
             }
@@ -103,7 +93,6 @@ impl Q1Factory {
 
         // 创建WebSocket管理器
         let (ws_manager, mut ws_rx) = create_websocket_manager().await?;
-        info!("✅ WebSocket管理器创建成功");
 
         // 创建策略管理器相关的通道
         let (strategy_data_tx, strategy_data_rx) = mpsc::channel::<Arc<UnifiedKlineData>>(1000);
@@ -121,7 +110,6 @@ impl Q1Factory {
         );
         
         // 为每个币种添加Q1策略
-        info!("🎯 为各币种配置Q1策略:");
         for symbol in &trading_symbols {
             // 根据币种设置不同的参数（调整为1小时周期）
             let (break_period, ema_period, profit_period, atr_period, atr_multiplier) = match symbol {
@@ -193,8 +181,8 @@ impl Q1Factory {
         });
 
         // 获取所有币种的历史K线数据进行初始化
+        info!("📈 获取历史数据初始化策略...");
         for symbol in &trading_symbols {
-            info!("   📈 获取 {} 历史数据", symbol.as_str());
             api_manager.get_history_klines(
                 symbol.as_str().to_string(),
                 "1h".to_string(),
@@ -207,8 +195,6 @@ impl Q1Factory {
             if let Some(message) = api_rx.recv().await {
                 match message {
                     ApiMessage::Kline(kline_data_list) => {
-                        info!("   📈 收到 {} 历史K线数据: {} 根", symbol.as_str(), kline_data_list.len());
-                        
                         for kline in kline_data_list.iter() {
                             // 设置symbol字段（API数据需要手动设置）
                             let mut api_kline = kline.clone();
@@ -220,74 +206,59 @@ impl Q1Factory {
                             // 发送数据到策略管理器
                             if let Err(e) = strategy_data_tx.send(Arc::new(unified_data)).await {
                                 error!("❌ 发送历史数据到策略管理器失败: {}", e);
-                            } else {
-                                debug!("📤 历史数据已发送到策略管理器: {} - 价格={:.6}", symbol.as_str(), kline.close);
                             }
                         }
-                        info!("   ✅ {} 历史数据初始化完成", symbol.as_str());
                     }
                 }
             }
         }
+        info!("✅ 历史数据初始化完成");
 
-        info!("{}", "=".repeat(80));
-        info!("🔄 开始实时数据处理");
+        // 配置批量WebSocket连接 - 为所有币种
+        let symbol_strings: Vec<String> = trading_symbols.iter()
+            .map(|symbol| symbol.as_str().to_lowercase())
+            .collect();
+        
+        let interval = "1h";
+        
+        let kline_config = KlineConfig::new_multi(
+            symbol_strings.clone(),
+            interval,
+            WebSocketBaseConfig {
+                auto_reconnect: true,
+                max_retries: 5,
+                retry_delay_secs: 5,
+                connection_timeout_secs: 10,
+                message_timeout_secs: 30,
+                enable_heartbeat: true,
+                heartbeat_interval_secs: 30,
+                tags: vec!["q1_multi_batch".to_string()],
+            },
+        );
 
-        // 配置WebSocket连接 - 为所有币种
-        let mut ws_configs = Vec::new();
-        for symbol in &trading_symbols {
-            let symbol_str = symbol.as_str().to_lowercase();
-            let interval = "1h";
-            
-            let kline_config = KlineConfig::new(
-                &symbol_str,
-                interval,
-                WebSocketBaseConfig {
-                    auto_reconnect: true,
-                    max_retries: 5,
-                    retry_delay_secs: 5,
-                    connection_timeout_secs: 10,
-                    message_timeout_secs: 30,
-                    enable_heartbeat: true,
-                    heartbeat_interval_secs: 30,
-                    tags: vec![format!("q1_multi_{}", symbol_str)],
-                },
-            );
-            
-            ws_configs.push((symbol.clone(), kline_config));
-        }
-
-        // 启动所有WebSocket连接
-        for (symbol, config) in &ws_configs {
-            info!("🔌 尝试建立WebSocket连接: {}/1h", symbol.as_str());
-            match ws_manager.start_kline(config.clone()).await {
-                Ok(_) => {
-                    info!("✅ {} WebSocket连接已建立", symbol.as_str());
-                }
-                Err(e) => {
-                    error!("❌ {} WebSocket连接失败: {}", symbol.as_str(), e);
-                    return Err(anyhow::anyhow!("{} WebSocket连接失败: {}", symbol.as_str(), e));
-                }
+        // 启动批量WebSocket连接
+        info!("🔌 建立批量WebSocket连接: {} 个币种", symbol_strings.len());
+        match ws_manager.start_multi_kline(kline_config).await {
+            Ok(_) => {
+                info!("✅ WebSocket连接已建立");
+            }
+            Err(e) => {
+                error!("❌ WebSocket连接失败: {}", e);
+                return Err(anyhow::anyhow!("WebSocket连接失败: {}", e));
             }
         }
 
         // 简化的统计变量
-        let mut message_count = 0;
+        let mut _message_count = 0;
 
         // 处理实时数据
-        info!("🎯 开始接收实时K线数据...");
+        info!("🎯 开始接收实时数据...");
         
         while let Some(message) = ws_rx.recv().await {
-            message_count += 1;
-
-            // 统计信息已移除，减少日志冗余
+            _message_count += 1;
 
             match message {
                 WebSocketMessage::Kline(kline_data) => {
-                    let kline_info = &kline_data.kline;
-                    websocket_log!(debug, "📈 收到K线数据: {}, 价格={:.6}, 完成={}", 
-                        kline_data.symbol.as_str(), kline_info.close_price, kline_info.is_closed);
-
                     // 发送数据到策略管理器
                     let ws_kline_data = (*kline_data).clone();
                     let unified_data = UnifiedKlineData::WebSocket(ws_kline_data);
@@ -297,12 +268,8 @@ impl Q1Factory {
                 }
                 _ => {}
             }
-
-            // 性能统计已移除，减少日志冗余
         }
         // 等待所有任务完成
-        info!("⏳ 等待所有任务完成...");
-        
         if let Err(e) = signal_manager_handle.await {
             eprintln!("❌ 信号处理任务异常: {}", e);
         }
@@ -311,7 +278,6 @@ impl Q1Factory {
             eprintln!("❌ 策略管理器任务异常: {:?}", e);
         }
 
-        info!("✅ 所有任务已完成");
         Ok(())
     }
 }

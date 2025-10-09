@@ -160,7 +160,6 @@ impl SignalManager {
     }
 
     pub async fn process_signals(&mut self) -> Result<()> {
-        tracing::info!("🚀 SignalManager开始等待信号...");
 
         while let Some(signal) = self.signal_receiver.recv().await {
             signal_log!(info, "📥 接收到信号: 策略={:?}, 交易对={}, 方向={:?}",

@@ -217,8 +217,14 @@ impl WebSocketManager {
                 }
             });
             
-            // 使用批量订阅方法
-            let result = ws_client.subscribe_multiple_klines(&symbols, &interval, kline_tx).await;
+            // 使用带重试的批量订阅方法
+            let result = ws_client.subscribe_multiple_klines_with_reconnect(
+                &symbols, 
+                &interval, 
+                kline_tx,
+                3, // max_retries
+                std::time::Duration::from_millis(100) // retry_delay
+            ).await;
             
             if let Err(e) = result {
                 websocket_log!(warn, "Multi kline connection failed: {}", e);
@@ -283,7 +289,13 @@ impl WebSocketManager {
                     }
                 });
                 
-                let result = ws_client.subscribe_kline(symbol, &interval, kline_tx).await;
+                let result = ws_client.subscribe_kline_with_reconnect(
+                    symbol, 
+                    &interval, 
+                    kline_tx,
+                    3, // max_retries
+                    std::time::Duration::from_millis(100) // retry_delay
+                ).await;
                 
                 if let Err(e) = result {
                     websocket_log!(warn, "Kline connection failed: {} - {}", symbol, e);
@@ -313,7 +325,7 @@ impl WebSocketManager {
         
         // 克隆配置数据以避免生命周期问题
         let symbols = config.symbol.clone();
-        let levels = config.levels;
+        let _levels = config.levels;
         let interval = config.interval.clone();
         let tags = config.base.tags.clone();
         
@@ -375,7 +387,7 @@ impl WebSocketManager {
         
         // 克隆配置数据以避免生命周期问题
         let symbols = config.symbol.clone();
-        let level = config.level;
+        let _level = config.level;
         let tags = config.base.tags.clone();
         
         // 创建连接信息
