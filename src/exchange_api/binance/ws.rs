@@ -371,7 +371,6 @@ impl BinanceWebSocket {
             match msg? {
                 Message::Text(text) => {
                     if let Ok(data) = serde_json::from_str::<KlineData>(&text) {
-                        println!("Received kline data: {:?}", data);
                         if let Err(e) = tx.send(data) {
                             websocket_log!(warn, "Failed to send kline message: {}", e);
                             break;

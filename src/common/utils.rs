@@ -1,4 +1,6 @@
+use crate::common::consts::PARSE_DECIMAL;
 use hmac::{Hmac, Mac};
+use std::num::ParseIntError;
 use sha2::Sha256;
 use std::time::{SystemTime, UNIX_EPOCH};
 /// # HMAC-SHA256 签名生成器
@@ -35,18 +37,18 @@ pub fn get_timestamp_ms() -> u64 {
 }
 
 /// 将目标价格与参考价格对齐精度
-/// 
+///
 /// # 参数
 /// - `reference_price`: 参考价格（通常是市场价格）
 /// - `target_price`: 需要调整精度的目标价格（通常是止损价格）
-/// 
+///
 /// # 返回
 /// 返回与参考价格精度对齐的目标价格
-/// 
+///
 /// # 示例
 /// ```
 /// use crate::common::utils::align_price_precision;
-/// 
+///
 /// let market_price = 95000.12;  // 市场价格，2位小数
 /// let stop_price = 94500.123456; // 止损价格，6位小数
 /// let aligned_stop_price = align_price_precision(market_price, stop_price);
@@ -56,7 +58,7 @@ pub fn align_price_precision(reference_price: f64, target_price: f64) -> f64 {
     // 使用更可靠的方法：通过分析参考价格的字符串表示来确定精度
     // 使用固定格式来确保小数位数的一致性
     let reference_str = format!("{:.10}", reference_price);
-    
+
     // 找到小数点的位置
     if let Some(dot_pos) = reference_str.find('.') {
         // 找到有效数字的结束位置（去除尾随的0）
@@ -67,10 +69,10 @@ pub fn align_price_precision(reference_price: f64, target_price: f64) -> f64 {
                 break;
             }
         }
-        
+
         // 计算小数位数
         let decimal_places = end_pos - dot_pos - 1;
-        
+
         // 根据小数位数调整目标价格
         let multiplier = 10_f64.powi(decimal_places as i32);
         (target_price * multiplier).round() / multiplier
@@ -80,6 +82,11 @@ pub fn align_price_precision(reference_price: f64, target_price: f64) -> f64 {
     }
 }
 
+#[inline]
+pub fn f2u(data: f64) -> u64 {
+    // 使用 round() 确保四舍五入，然后转换为 u64
+    (data * PARSE_DECIMAL) as u64
+}
 #[cfg(test)]
 mod tests {
     use super::*;

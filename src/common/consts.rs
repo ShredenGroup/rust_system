@@ -15,3 +15,4 @@ pub const LONG: &str = "LONG";
 pub const SHORT: &str = "SHORT";
 pub const CLOSE: &str = "CLOSE";
 pub const OPEN: &str = "OPEN";
+pub const PARSE_DECIMAL: f64 = 100_000_000.0; // 10^8

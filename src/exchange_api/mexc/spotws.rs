@@ -364,7 +364,7 @@ impl MexcWebSocket {
         &self,
         symbol: &str,
         level: u32,
-        tx: mpsc::UnboundedSender<String>,
+        tx: mpsc::UnboundedSender<crate::dto::mexc::PushDataV3ApiWrapper>,
     ) -> anyhow::Result<()> {
         let ws_url = self.base_url.clone();
         println!("Connecting to MEXC WebSocket for depth: {}", ws_url);
@@ -418,30 +418,8 @@ impl MexcWebSocket {
                                 println!("📊 深度数据: 买单数量: {} | 卖单数量: {} | 版本: {}", 
                                     depth.bids.len(), depth.asks.len(), depth.version);
                                 
-                                // 转换为 JSON 格式发送到通道
-                                let symbol_name = wrapper.symbol.clone().unwrap_or_else(|| symbol.to_uppercase());
-                                let json_data = serde_json::json!({
-                                    "symbol": symbol_name,
-                                    "level": level,
-                                    "bids": depth.bids.iter().map(|bid| {
-                                        serde_json::json!({
-                                            "price": bid.price.parse::<f64>().unwrap_or(0.0),
-                                            "quantity": bid.quantity.parse::<f64>().unwrap_or(0.0)
-                                        })
-                                    }).collect::<Vec<_>>(),
-                                    "asks": depth.asks.iter().map(|ask| {
-                                        serde_json::json!({
-                                            "price": ask.price.parse::<f64>().unwrap_or(0.0),
-                                            "quantity": ask.quantity.parse::<f64>().unwrap_or(0.0)
-                                        })
-                                    }).collect::<Vec<_>>(),
-                                    "version": depth.version,
-                                    "event_type": depth.event_type,
-                                    "send_time": wrapper.send_time.unwrap_or(0),
-                                    "timestamp": chrono::Utc::now().timestamp()
-                                });
-                                
-                                if let Err(e) = tx.send(json_data.to_string()) {
+                                // 直接发送 protobuf 结构体到通道
+                                if let Err(e) = tx.send(wrapper) {
                                     eprintln!("Failed to send depth message: {}", e);
                                     break;
                                 }
@@ -451,12 +429,9 @@ impl MexcWebSocket {
                         }
                         Err(e) => {
                             eprintln!("❌ 深度数据 Protobuf 解析失败: {}", e);
-                            // 如果解析失败，发送原始十六进制数据用于调试
-                            let hex_data = hex::encode(&data);
-                            if let Err(e) = tx.send(format!("DEPTH_PARSE_ERROR:{}", hex_data)) {
-                                eprintln!("Failed to send error message: {}", e);
-                                break;
-                            }
+                            // 解析失败时，创建一个空的 wrapper 作为错误标记
+                            // 或者可以选择跳过这个消息
+                            println!("⚠️ 跳过无法解析的深度数据");
                         }
                     }
                 }
@@ -486,7 +461,7 @@ impl MexcWebSocket {
     pub async fn subscribe_multiple_depths(
         &self,
         subscriptions: Vec<(String, u32)>, // (symbol, level)
-        tx: mpsc::UnboundedSender<String>,
+        tx: mpsc::UnboundedSender<crate::dto::mexc::PushDataV3ApiWrapper>,
     ) -> anyhow::Result<()> {
         let ws_url = self.base_url.clone();
         println!("Connecting to MEXC WebSocket for multiple depth subscriptions: {}", ws_url);
@@ -523,11 +498,8 @@ impl MexcWebSocket {
                 WsMessage::Text(text) => {
                     println!("📥 收到多深度文本消息: {}", text);
                     
-                    // 发送到通道
-                    if let Err(e) = tx.send(text.clone()) {
-                        eprintln!("Failed to send message: {}", e);
-                        break;
-                    }
+                    // 跳过文本消息，只处理 protobuf 数据
+                    println!("⚠️ 跳过文本消息，只处理 protobuf 数据");
                 }
                 WsMessage::Binary(data) => {
                     println!("📊 收到多深度二进制数据(protobuf)，长度: {}", data.len());
@@ -539,29 +511,8 @@ impl MexcWebSocket {
                                 println!("📊 收到多深度数据: {} | 买单: {} | 卖单: {} | 版本: {}", 
                                     wrapper.channel, depth.bids.len(), depth.asks.len(), depth.version);
                                 
-                                // 转换为 JSON 格式发送到通道
-                                let symbol_name = wrapper.symbol.clone().unwrap_or_else(|| "UNKNOWN".to_string());
-                                let json_data = serde_json::json!({
-                                    "symbol": symbol_name,
-                                    "bids": depth.bids.iter().map(|bid| {
-                                        serde_json::json!({
-                                            "price": bid.price.parse::<f64>().unwrap_or(0.0),
-                                            "quantity": bid.quantity.parse::<f64>().unwrap_or(0.0)
-                                        })
-                                    }).collect::<Vec<_>>(),
-                                    "asks": depth.asks.iter().map(|ask| {
-                                        serde_json::json!({
-                                            "price": ask.price.parse::<f64>().unwrap_or(0.0),
-                                            "quantity": ask.quantity.parse::<f64>().unwrap_or(0.0)
-                                        })
-                                    }).collect::<Vec<_>>(),
-                                    "version": depth.version,
-                                    "event_type": depth.event_type,
-                                    "send_time": wrapper.send_time.unwrap_or(0),
-                                    "timestamp": chrono::Utc::now().timestamp()
-                                });
-                                
-                                if let Err(e) = tx.send(json_data.to_string()) {
+                                // 直接发送 protobuf 结构体到通道
+                                if let Err(e) = tx.send(wrapper) {
                                     eprintln!("Failed to send depth message: {}", e);
                                     break;
                                 }
@@ -571,12 +522,8 @@ impl MexcWebSocket {
                         }
                         Err(e) => {
                             eprintln!("❌ 多深度数据 Protobuf 解析失败: {}", e);
-                            // 如果解析失败，发送原始十六进制数据用于调试
-                            let hex_data = hex::encode(&data);
-                            if let Err(e) = tx.send(format!("MULTI_DEPTH_PARSE_ERROR:{}", hex_data)) {
-                                eprintln!("Failed to send error message: {}", e);
-                                break;
-                            }
+                            // 解析失败时跳过这个消息
+                            println!("⚠️ 跳过无法解析的多深度数据");
                         }
                     }
                 }
@@ -916,7 +863,7 @@ mod tests {
     #[tokio::test]
     async fn test_depth_subscription() {
         let ws = MexcWebSocket::new();
-        let (tx, mut rx) = mpsc::unbounded_channel();
+        let (tx, mut rx) = mpsc::unbounded_channel::<crate::dto::mexc::PushDataV3ApiWrapper>();
 
         // 启动深度 WebSocket 连接
         let symbol = "BTCUSDT";
@@ -931,7 +878,7 @@ mod tests {
         let max_messages = 5;
 
         while let Some(data) = rx.recv().await {
-            println!("Received Depth: {}", data);
+            println!("Received Depth: {:?}", data);
             message_count += 1;
 
             if message_count >= max_messages {
@@ -946,7 +893,7 @@ mod tests {
     #[tokio::test]
     async fn test_multiple_depths_subscription() {
         let ws = MexcWebSocket::new();
-        let (tx, mut rx) = mpsc::unbounded_channel();
+        let (tx, mut rx) = mpsc::unbounded_channel::<crate::dto::mexc::PushDataV3ApiWrapper>();
 
         // 订阅多个交易对的深度数据
         let subscriptions = vec![
@@ -963,7 +910,7 @@ mod tests {
         let max_messages = 10;
 
         while let Some(data) = rx.recv().await {
-            println!("Received Multiple Depth: {}", data);
+            println!("Received Multiple Depth: {:?}", data);
             message_count += 1;
 
             if message_count >= max_messages {
