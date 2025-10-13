@@ -121,8 +121,8 @@ impl Q1Strategy {
                 self.last_price = close_price;
                 
                 // 计算数量: 使用海龟交易逻辑，根据止损距离计算开仓数量
-                // 固定风险敞口50美金，数量 = 风险敞口 / 止损距离
-                let risk_amount = 50.0; // 固定风险敞口50美金
+                // 固定风险敞口5美金，数量 = 风险敞口 / 止损距离
+                let risk_amount = 5.0; // 固定风险敞口5美金
                 let stop_distance = if let Some(stop_price) = self.last_stop_price {
                     (close_price - stop_price).abs() // 使用保存的止损价格
                 } else {
@@ -160,8 +160,8 @@ impl Q1Strategy {
                 self.last_price = close_price;
                 self.last_stop_price = Some(stop_price);
                 // 计算数量: 使用海龟交易逻辑，根据止损距离计算开仓数量
-                // 固定风险敞口50美金，数量 = 风险敞口 / 止损距离
-                let risk_amount = 50.0; // 固定风险敞口50美金
+                // 固定风险敞口5美金，数量 = 风险敞口 / 止损距离
+                let risk_amount = 5.0; // 固定风险敞口5美金
                 let stop_distance = (close_price - raw_stop_price).abs(); // 止损距离
                 let raw_quantity = risk_amount / stop_distance;
                 let quantity = self.symbol.align_quantity(raw_quantity);
@@ -196,8 +196,8 @@ impl Q1Strategy {
                 self.last_price = close_price;
                 self.last_stop_price = Some(stop_price);
                 // 计算数量: 使用海龟交易逻辑，根据止损距离计算开仓数量
-                // 固定风险敞口50美金，数量 = 风险敞口 / 止损距离
-                let risk_amount = 50.0; // 固定风险敞口50美金
+                // 固定风险敞口5美金，数量 = 风险敞口 / 止损距离
+                let risk_amount = 5.0; // 固定风险敞口5美金
                 let stop_distance = (close_price - raw_stop_price).abs(); // 止损距离
                 let raw_quantity = risk_amount / stop_distance;
                 let quantity = self.symbol.align_quantity(raw_quantity);
