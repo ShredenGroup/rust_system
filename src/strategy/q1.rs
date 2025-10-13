@@ -3,7 +3,7 @@ use ta::{Next, Close, High, Low, Open};
 use crate::common::enums::{Exchange, StrategyName};
 use crate::models::{TradingSignal, Side, TradingSymbol};
 use crate::common::ts::{Strategy, IsClosed, SymbolEnum, SymbolSetter};
-use crate::common::utils::{get_timestamp_ms, align_price_precision};
+use crate::common::utils::get_timestamp_ms;
 use crate::signal_log;
 use anyhow::Result;
 
@@ -120,8 +120,16 @@ impl Q1Strategy {
                 self.current_signal = 0;
                 self.last_price = close_price;
                 
-                // 计算数量: 50/close_price 向下取整，最小0.001
-                let quantity = (50.0 / close_price).floor().max(0.001);
+                // 计算数量: 使用海龟交易逻辑，根据止损距离计算开仓数量
+                // 固定风险敞口50美金，数量 = 风险敞口 / 止损距离
+                let risk_amount = 50.0; // 固定风险敞口50美金
+                let stop_distance = if let Some(stop_price) = self.last_stop_price {
+                    (close_price - stop_price).abs() // 使用保存的止损价格
+                } else {
+                    close_price * 0.01 // 如果没有止损价格，使用1%作为默认止损距离
+                };
+                let raw_quantity = risk_amount / stop_distance;
+                let quantity = self.symbol.align_quantity(raw_quantity);
                 
                 return Some(TradingSignal::new_close_signal(
                     1,
@@ -143,7 +151,7 @@ impl Q1Strategy {
             // 3. 价格在240 EMA上方
             if high_price > max_break && self.prev_high < max_break && close_price > ema_value {
                 let raw_stop_price = close_price - (self.atr_multiplier * atr_value); // ATR止损
-                let stop_price = align_price_precision(close_price, raw_stop_price); // 与市场价格对齐精度
+                let stop_price = self.symbol.align_price(raw_stop_price); // 使用交易对精度对齐
                 
                 signal_log!(info, "🎯 Q1策略发出开多信号: 交易对={}, 当前价格={:.8}, 原始止损价={:.8}, 对齐后止损价={:.8}", 
                     self.symbol.as_str(), close_price, raw_stop_price, stop_price);
@@ -151,8 +159,12 @@ impl Q1Strategy {
                 self.current_signal = 1;
                 self.last_price = close_price;
                 self.last_stop_price = Some(stop_price);
-                // 计算数量: 50/close_price 向下取整，最小0.001
-                let quantity = (50.0 / close_price).floor().max(0.001);
+                // 计算数量: 使用海龟交易逻辑，根据止损距离计算开仓数量
+                // 固定风险敞口50美金，数量 = 风险敞口 / 止损距离
+                let risk_amount = 50.0; // 固定风险敞口50美金
+                let stop_distance = (close_price - raw_stop_price).abs(); // 止损距离
+                let raw_quantity = risk_amount / stop_distance;
+                let quantity = self.symbol.align_quantity(raw_quantity);
                 
                 signal_log!(info, "📊 开多信号详情: 数量={:.8}, 止损价={:.8}, 价格精度对齐完成", quantity, stop_price);
                 
@@ -175,7 +187,7 @@ impl Q1Strategy {
             // 3. 价格在240 EMA下方
             else if low_price < min_break && self.prev_low >= min_break && close_price < ema_value {
                 let raw_stop_price = close_price + (self.atr_multiplier * atr_value); // ATR止损
-                let stop_price = align_price_precision(close_price, raw_stop_price); // 与市场价格对齐精度
+                let stop_price = self.symbol.align_price(raw_stop_price); // 使用交易对精度对齐
                 
                 signal_log!(info, "🎯 Q1策略发出开空信号: 交易对={}, 当前价格={:.8}, 原始止损价={:.8}, 对齐后止损价={:.8}", 
                     self.symbol.as_str(), close_price, raw_stop_price, stop_price);
@@ -183,8 +195,12 @@ impl Q1Strategy {
                 self.current_signal = 2;
                 self.last_price = close_price;
                 self.last_stop_price = Some(stop_price);
-                // 计算数量: 20/close_price 向下取整，最小0.001
-                let quantity = (50.0 / close_price).floor().max(0.001);
+                // 计算数量: 使用海龟交易逻辑，根据止损距离计算开仓数量
+                // 固定风险敞口50美金，数量 = 风险敞口 / 止损距离
+                let risk_amount = 50.0; // 固定风险敞口50美金
+                let stop_distance = (close_price - raw_stop_price).abs(); // 止损距离
+                let raw_quantity = risk_amount / stop_distance;
+                let quantity = self.symbol.align_quantity(raw_quantity);
                 
                 signal_log!(info, "📊 开空信号详情: 数量={:.8}, 止损价={:.8}, 价格精度对齐完成", quantity, stop_price);
                 

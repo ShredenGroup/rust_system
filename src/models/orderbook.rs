@@ -1,7 +1,8 @@
+use crate::common::utils::f2u;
+use crate::dto::binance::websocket::DepthUpdateData;
 use crate::dto::mexc::PushDataV3ApiWrapper;
 use crate::models::{Exchange, TradingSymbol};
 use std::collections::BTreeMap;
-use crate::common::utils::f2u;
 type Price = u64;
 type Quantity = u64;
 #[derive(Debug, Clone)]
@@ -22,28 +23,57 @@ impl CommonDepth {
                 items
                     .iter()
                     .filter_map(|item| {
-                        item.price.parse::<f64>()
-                            .ok()
-                            .and_then(|price| {
-                                item.quantity.parse::<f64>()
-                                    .ok()
-                                    .map(|quantity| (f2u(price), f2u(quantity)))
-                            })
+                        item.price.parse::<f64>().ok().and_then(|price| {
+                            item.quantity
+                                .parse::<f64>()
+                                .ok()
+                                .map(|quantity| (f2u(price), f2u(quantity)))
+                        })
                     })
                     .collect::<BTreeMap<Price, Quantity>>()
             };
-            
+
             Some(CommonDepth {
                 bid_list: depth_to_map(&partial_depth.bids),
                 ask_list: depth_to_map(&partial_depth.asks),
-                symbol: data.symbol
+                symbol: data
+                    .symbol
                     .map(TradingSymbol::from)
                     .unwrap_or(TradingSymbol::BTCUSDT),
-                timestamp: data.create_time.unwrap_or_else(|| data.send_time.unwrap_or(0)),
+                timestamp: data
+                    .create_time
+                    .unwrap_or_else(|| data.send_time.unwrap_or(0)),
                 exchange: Exchange::Mexc,
             })
         } else {
             None
+        }
+    }
+
+    pub fn new_from_binance(data: DepthUpdateData) -> Self {
+        // 辅助函数：将 Binance 深度数据转换为 BTreeMap
+        let depth_to_map = |items: &[[f64; 2]]| {
+            items
+                .iter()
+                .filter_map(|item| {
+                    let price = item[0];
+                    let quantity = item[1];
+                    // 过滤掉价格为0或数量为0的无效数据
+                    if price > 0.0 && quantity > 0.0 {
+                        Some((f2u(price), f2u(quantity)))
+                    } else {
+                        None
+                    }
+                })
+                .collect::<BTreeMap<Price, Quantity>>()
+        };
+
+        CommonDepth {
+            bid_list: depth_to_map(&data.bids),
+            ask_list: depth_to_map(&data.asks),
+            symbol: data.symbol,
+            timestamp: data.transaction_time,
+            exchange: Exchange::Binance,
         }
     }
 }

@@ -92,7 +92,7 @@ impl TradingSymbol {
             TradingSymbol::XRPUSDT => SymbolPrecision::new(4, 0),  // 价格4位，数量0位
             TradingSymbol::DOGEUSDT => SymbolPrecision::new(5, 0), // 价格5位，数量0位
             TradingSymbol::TURBOUSDT => SymbolPrecision::new(6, 0), // 价格6位，数量0位
-            TradingSymbol::BNBUSDT => SymbolPrecision::new(2, 3),  // 价格2位，数量3位
+            TradingSymbol::BNBUSDT => SymbolPrecision::new(2, 2),  // 价格2位，数量2位
             TradingSymbol::AVAXUSDT => SymbolPrecision::new(3, 2), // 价格3位，数量2位
             TradingSymbol::MATICUSDT => SymbolPrecision::new(4, 0), // 价格4位，数量0位
             TradingSymbol::DOTUSDT => SymbolPrecision::new(3, 2),  // 价格3位，数量2位
@@ -102,7 +102,7 @@ impl TradingSymbol {
             TradingSymbol::PEPEUSDT => SymbolPrecision::new(8, 0), // 价格8位，数量0位
             TradingSymbol::NEIROUSDT => SymbolPrecision::new(4, 0), // 价格4位，数量0位
             TradingSymbol::ONDOUSDT => SymbolPrecision::new(4, 0), // 价格4位，数量0位
-            TradingSymbol::AAVEUSDT => SymbolPrecision::new(2, 3), // 价格2位，数量3位
+            TradingSymbol::AAVEUSDT => SymbolPrecision::new(2, 1), // 价格2位，数量1位
             TradingSymbol::Custom(_) => SymbolPrecision::new(6, 3), // 自定义符号默认精度
         }
     }

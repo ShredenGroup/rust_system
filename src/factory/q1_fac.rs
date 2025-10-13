@@ -50,7 +50,7 @@ impl Q1Factory {
 
         // 定义要交易的币种
         let trading_symbols = vec![
-            TradingSymbol::BTCUSDT,   // 比特币
+            TradingSymbol::BNBUSDT,   // 币安币
             TradingSymbol::ETHUSDT,   // 以太坊
             TradingSymbol::PEPEUSDT,  // 映射到 "1000PEPEUSDT"
             TradingSymbol::NEIROUSDT,
@@ -113,12 +113,12 @@ impl Q1Factory {
         for symbol in &trading_symbols {
             // 根据币种设置不同的参数（调整为1小时周期）
             let (break_period, ema_period, profit_period, atr_period, atr_multiplier) = match symbol {
-                TradingSymbol::BTCUSDT => (
-                    50,     // 突破周期保持不变（50小时）
-                    240,    // EMA周期保持不变（240小时）
-                    15,     // 止盈周期保持不变（15小时）
-                    20,     // ATR周期保持不变（20小时）
-                    2.5,    // ATR倍数保持不变
+                TradingSymbol::BNBUSDT => (
+                    45,     // 突破周期（45小时）
+                    240,    // EMA周期（240小时）
+                    12,     // 止盈周期（12小时）
+                    20,     // ATR周期（20小时）
+                    2.8,    // ATR倍数
                 ),
                 TradingSymbol::ETHUSDT => (
                     45,     // 突破周期保持不变（45小时）
