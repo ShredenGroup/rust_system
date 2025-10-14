@@ -52,11 +52,10 @@ impl Q1Factory {
         let trading_symbols = vec![
             TradingSymbol::BNBUSDT,   // 币安币
             TradingSymbol::ETHUSDT,   // 以太坊
-            TradingSymbol::PEPEUSDT,  // 映射到 "1000PEPEUSDT"
             TradingSymbol::NEIROUSDT,
             TradingSymbol::ONDOUSDT,  // ONDO
-            TradingSymbol::AAVEUSDT,  // AAVE
-            TradingSymbol::SOLUSDT,   // Solana
+            TradingSymbol::TAOUSDT,   // TAO
+            TradingSymbol::ASTERUSDT, // ASTER
         ];
         
         info!("📊 交易币种: {} 个", trading_symbols.len());
@@ -134,19 +133,19 @@ impl Q1Factory {
                     20,     // ATR周期保持不变（20小时）
                     3.5,    // ATR倍数保持不变
                 ),
-                TradingSymbol::AAVEUSDT => (
-                    32,     // 突破周期保持不变（32小时）
-                    240,    // EMA周期保持不变（240小时）
-                    9,      // 止盈周期保持不变（9小时）
-                    20,     // ATR周期保持不变（20小时）
-                    3.2,    // ATR倍数保持不变
+                TradingSymbol::TAOUSDT => (
+                    35,     // 突破周期（35小时）
+                    240,    // EMA周期（240小时）
+                    10,     // 止盈周期（10小时）
+                    20,     // ATR周期（20小时）
+                    3.0,    // ATR倍数
                 ),
-                TradingSymbol::SOLUSDT => (
-                    40,     // 突破周期保持不变（40小时）
-                    240,    // EMA周期保持不变（240小时）
-                    10,     // 止盈周期保持不变（10小时）
-                    20,     // ATR周期保持不变（20小时）
-                    3.0,    // ATR倍数保持不变
+                TradingSymbol::ASTERUSDT => (
+                    38,     // 突破周期（38小时）
+                    240,    // EMA周期（240小时）
+                    11,     // 止盈周期（11小时）
+                    20,     // ATR周期（20小时）
+                    2.8,    // ATR倍数
                 ),
                 _ => (
                     35,     // 默认突破周期保持不变（35小时）

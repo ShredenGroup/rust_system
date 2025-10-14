@@ -43,6 +43,8 @@ pub enum TradingSymbol {
     NEIROUSDT,
     ONDOUSDT,
     AAVEUSDT,
+    ASTERUSDT,
+    TAOUSDT,
 
     // 自定义符号 - 使用固定大小数组 [u8; 20]，完全栈分配，支持 Copy
     Custom([u8; 15]),
@@ -70,6 +72,8 @@ impl TradingSymbol {
             TradingSymbol::NEIROUSDT => "NEIROUSDT",
             TradingSymbol::ONDOUSDT => "ONDOUSDT",
             TradingSymbol::AAVEUSDT => "AAVEUSDT",
+            TradingSymbol::ASTERUSDT => "ASTERUSDT",
+            TradingSymbol::TAOUSDT => "TAOUSDT",
             TradingSymbol::Custom(bytes) => {
                 // 找到第一个0字节来确定字符串长度
                 let len = bytes.iter().position(|&b| b == 0).unwrap_or(15);
@@ -103,6 +107,8 @@ impl TradingSymbol {
             TradingSymbol::NEIROUSDT => SymbolPrecision::new(4, 0), // 价格4位，数量0位
             TradingSymbol::ONDOUSDT => SymbolPrecision::new(4, 0), // 价格4位，数量0位
             TradingSymbol::AAVEUSDT => SymbolPrecision::new(2, 1), // 价格2位，数量1位
+            TradingSymbol::ASTERUSDT => SymbolPrecision::new(4, 0), // 价格4位，数量0位
+            TradingSymbol::TAOUSDT => SymbolPrecision::new(2, 3), // 价格2位，数量3位
             TradingSymbol::Custom(_) => SymbolPrecision::new(6, 3), // 自定义符号默认精度
         }
     }
@@ -147,6 +153,8 @@ impl TradingSymbol {
             "NEIROUSDT" => TradingSymbol::NEIROUSDT,
             "ONDOUSDT" => TradingSymbol::ONDOUSDT,
             "AAVEUSDT" => TradingSymbol::AAVEUSDT,
+            "ASTERUSDT" => TradingSymbol::ASTERUSDT,
+            "TAOUSDT" => TradingSymbol::TAOUSDT,
             _ => {
                 // 检查字符串长度
                 if s.len() > 20 {
