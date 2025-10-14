@@ -29,6 +29,8 @@ pub struct Q1Strategy {
     pub current_signal: u8,
     // 缓存最新价格和指标值
     pub last_price: f64,
+    // 开仓价格 - 用于计算盈亏
+    pub entry_price: f64,
     // 最近一次开仓时确定的止损价（多单: 价格-ATR*k，空单: 价格+ATR*k）
     pub last_stop_price: Option<f64>,
     pub last_ema: f64,
@@ -65,6 +67,7 @@ impl Q1Strategy {
             finish_init: false,
             current_signal: 0,
             last_price: 0.0,
+            entry_price: 0.0,
             last_stop_price: None,
             last_ema: 0.0,
             last_atr: 0.0,
@@ -96,8 +99,8 @@ impl Q1Strategy {
         if self.current_signal != 0 {
             // 计算当前盈亏
             let current_profit = match self.current_signal {
-                1 => close_price - self.last_price, // 多头：当前价格 - 开仓价格
-                2 => self.last_price - close_price, // 空头：开仓价格 - 当前价格
+                1 => close_price - self.entry_price, // 多头：当前价格 - 开仓价格
+                2 => self.entry_price - close_price, // 空头：开仓价格 - 当前价格
                 _ => 0.0,
             };
             
@@ -113,7 +116,7 @@ impl Q1Strategy {
 
             if should_close {
                 signal_log!(info, "🎯 Q1策略止盈信号: 交易对={}, 开仓价={:.8}, 当前价={:.8}, 盈亏={:.8}", 
-                    self.symbol.as_str(), self.last_price, close_price, current_profit);
+                    self.symbol.as_str(), self.entry_price, close_price, current_profit);
                 
                 // 风控：若价格已触发止损（多单<=止损；空单>=止损），则不发送平仓信号
                 if let Some(stop) = self.last_stop_price {
@@ -170,6 +173,7 @@ impl Q1Strategy {
                 
                 self.current_signal = 1;
                 self.last_price = close_price;
+                self.entry_price = close_price; // 记录开仓价格
                 self.last_stop_price = Some(stop_price);
                 // 计算数量: 使用海龟交易逻辑，根据止损距离计算开仓数量
                 // 固定风险敞口5美金，数量 = 风险敞口 / 止损距离
@@ -206,6 +210,7 @@ impl Q1Strategy {
                 
                 self.current_signal = 2;
                 self.last_price = close_price;
+                self.entry_price = close_price; // 记录开仓价格
                 self.last_stop_price = Some(stop_price);
                 // 计算数量: 使用海龟交易逻辑，根据止损距离计算开仓数量
                 // 固定风险敞口5美金，数量 = 风险敞口 / 止损距离
