@@ -99,7 +99,7 @@ impl TradingSymbol {
             TradingSymbol::LINKUSDT => SymbolPrecision::new(3, 2), // 价格3位，数量2位
             TradingSymbol::LTCUSDT => SymbolPrecision::new(2, 3),  // 价格2位，数量3位
             TradingSymbol::UNIUSDT => SymbolPrecision::new(3, 2),  // 价格3位，数量2位
-            TradingSymbol::PEPEUSDT => SymbolPrecision::new(8, 0), // 价格8位，数量0位
+            TradingSymbol::PEPEUSDT => SymbolPrecision::new(7, 0), // 价格8位，数量0位
             TradingSymbol::NEIROUSDT => SymbolPrecision::new(4, 0), // 价格4位，数量0位
             TradingSymbol::ONDOUSDT => SymbolPrecision::new(4, 0), // 价格4位，数量0位
             TradingSymbol::AAVEUSDT => SymbolPrecision::new(2, 1), // 价格2位，数量1位
