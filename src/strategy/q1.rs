@@ -97,6 +97,29 @@ impl Q1Strategy {
                     atr_value: f64) -> Option<TradingSignal> {
         // 1. 检查是否需要平仓
         if self.current_signal != 0 {
+            // 首先检查止损
+            if let Some(stop_price) = self.last_stop_price {
+                let stop_loss_triggered = match self.current_signal {
+                    1 => close_price <= stop_price, // 多头：当前价格 <= 止损价
+                    2 => close_price >= stop_price, // 空头：当前价格 >= 止损价
+                    _ => false,
+                };
+                
+                if stop_loss_triggered {
+                    signal_log!(warn, "🛑 Q1策略止损触发: 交易对={}, 开仓价={:.8}, 当前价={:.8}, 止损价={:.8}", 
+                        self.symbol.as_str(), self.entry_price, close_price, stop_price);
+                    
+                    // 止损单已经在交易所层面执行，策略只需要重置状态
+                    self.current_signal = 0;
+                    self.last_price = close_price;
+                    self.last_stop_price = None; // 清空止损价格
+                    
+                    // 不返回平仓信号，因为止损单已经自动执行
+                    return None;
+                }
+            }
+            
+            // 然后检查止盈
             // 计算当前盈亏
             let current_profit = match self.current_signal {
                 1 => close_price - self.entry_price, // 多头：当前价格 - 开仓价格
@@ -118,19 +141,6 @@ impl Q1Strategy {
                 signal_log!(info, "🎯 Q1策略止盈信号: 交易对={}, 开仓价={:.8}, 当前价={:.8}, 盈亏={:.8}", 
                     self.symbol.as_str(), self.entry_price, close_price, current_profit);
                 
-                // 风控：若价格已触发止损（多单<=止损；空单>=止损），则不发送平仓信号
-                if let Some(stop) = self.last_stop_price {
-                    let violated = match self.current_signal {
-                        1 => close_price <= stop, // 多单
-                        2 => close_price >= stop, // 空单
-                        _ => false,
-                    };
-                    if violated {
-                        signal_log!(warn, "⚠️ 止盈信号被止损风控拦截: 交易对={}, 当前价={:.8}, 止损价={:.8}", 
-                            self.symbol.as_str(), close_price, stop);
-                        return None;
-                    }
-                }
                 let position_to_close = self.current_signal;
                 self.current_signal = 0;
                 self.last_price = close_price;
