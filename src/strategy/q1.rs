@@ -94,17 +94,27 @@ impl Q1Strategy {
                     atr_value: f64) -> Option<TradingSignal> {
         // 1. 检查是否需要平仓
         if self.current_signal != 0 {
+            // 计算当前盈亏
+            let current_profit = match self.current_signal {
+                1 => close_price - self.last_price, // 多头：当前价格 - 开仓价格
+                2 => self.last_price - close_price, // 空头：开仓价格 - 当前价格
+                _ => 0.0,
+            };
+            
             let should_close = match self.current_signal {
-                1 => { // 多头持仓，当价格跌破止盈周期低点时平仓
-                    close_price < min_profit
+                1 => { // 多头持仓，当价格跌破止盈周期低点时平仓，但必须是盈利状态
+                    close_price < min_profit && current_profit > 0.0
                 }
-                2 => { // 空头持仓，当价格突破止盈周期高点时平仓
-                    close_price > max_profit
+                2 => { // 空头持仓，当价格突破止盈周期高点时平仓，但必须是盈利状态
+                    close_price > max_profit && current_profit > 0.0
                 }
                 _ => false,
             };
 
             if should_close {
+                signal_log!(info, "🎯 Q1策略止盈信号: 交易对={}, 开仓价={:.8}, 当前价={:.8}, 盈亏={:.8}", 
+                    self.symbol.as_str(), self.last_price, close_price, current_profit);
+                
                 // 风控：若价格已触发止损（多单<=止损；空单>=止损），则不发送平仓信号
                 if let Some(stop) = self.last_stop_price {
                     let violated = match self.current_signal {
@@ -113,6 +123,8 @@ impl Q1Strategy {
                         _ => false,
                     };
                     if violated {
+                        signal_log!(warn, "⚠️ 止盈信号被止损风控拦截: 交易对={}, 当前价={:.8}, 止损价={:.8}", 
+                            self.symbol.as_str(), close_price, stop);
                         return None;
                     }
                 }
