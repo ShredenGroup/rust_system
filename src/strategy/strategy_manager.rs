@@ -37,7 +37,7 @@ impl IdGenerator {
 }
 
 /// 单个品种的策略管理器
-/// 负责管理特定品种的所有策略
+
 pub struct SymbolStrategyManager<T: Close + High + Open + Low + Tbbav + Tbqav + Send + Sync + IsClosed + Symbol + 'static> {
     symbol: TradingSymbol,
     strategies: Vec<StrategyEnum>,

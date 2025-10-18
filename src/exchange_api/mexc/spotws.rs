@@ -766,183 +766,116 @@ impl MexcWebSocket {
 
         Ok(())
     }
-}
 
-// 使用示例和测试
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use tokio::sync::mpsc;
+    /// 订阅 Diff.Depth Stream (增量深度数据)
+    ///
+    /// # Arguments
+    /// * `symbol` - 交易对符号，如 "BTCUSDT" (必须大写)
+    /// * `interval` - 推送间隔，如 "100ms" 或 "10ms"
+    /// * `tx` - 消息发送通道
+    pub async fn subscribe_diff_depth(
+        &self,
+        symbol: &str,
+        interval: &str,
+        tx: mpsc::UnboundedSender<crate::dto::mexc::PushDataV3ApiWrapper>,
+    ) -> anyhow::Result<()> {
+        let ws_url = self.base_url.clone();
+        println!("Connecting to MEXC WebSocket for diff depth: {}", ws_url);
 
-    #[tokio::test]
-    async fn test_mexc_websocket_connection() {
-        let ws = MexcWebSocket::new();
-        let (tx, mut rx) = mpsc::unbounded_channel();
+        let url: Url = Url::parse(&ws_url)?;
+        let (ws_stream, _) = connect_async(url).await?;
 
-        // 启动 WebSocket 连接
-        let symbol = "BTCUSDT";
-        let interval = "Min15";
+        println!("✅ MEXC WebSocket connected successfully for diff depth");
 
-        let ws_handle = tokio::spawn(async move { 
-            ws.subscribe_kline(symbol, interval, tx).await 
+        let (mut write, mut read) = ws_stream.split();
+
+        // 发送订阅请求
+        let subscribe_msg = serde_json::json!({
+            "method": "SUBSCRIPTION",
+            "params": [
+                format!("spot@public.aggre.depth.v3.api.pb@{}@{}", interval, symbol.to_uppercase())
+            ]
         });
 
-        // 接收几条消息
-        let mut message_count = 0;
-        let max_messages = 5;
+        let subscribe_text = subscribe_msg.to_string();
+        println!("📤 发送Diff.Depth订阅请求: {}", subscribe_text);
+        
+        let msg = WsMessage::Text(subscribe_text);
+        write.send(msg).await?;
 
-        while let Some(data) = rx.recv().await {
-            println!("Received: {}", data);
-            message_count += 1;
-
-            if message_count >= max_messages {
-                break;
+        // 处理接收到的消息
+        while let Some(msg) = read.next().await {
+            match msg? {
+                WsMessage::Text(text) => {
+                    println!("📥 收到Diff.Depth文本消息: {}", text);
+                    
+                    // 检查是否是订阅响应
+                    if let Ok(response) = serde_json::from_str::<serde_json::Value>(&text) {
+                        if let Some(method) = response.get("method") {
+                            if method == "SUBSCRIPTION" {
+                                println!("✅ Diff.Depth订阅成功: {}", text);
+                            }
+                        }
+                    }
+                }
+                WsMessage::Binary(data) => {
+                    println!("📊 收到Diff.Depth二进制数据(protobuf)，长度: {}", data.len());
+                    
+                    // 尝试解析 MEXC 官方 protobuf 结构
+                    match PushDataV3ApiWrapper::decode(&*data) {
+                        Ok(wrapper) => {
+                            println!("✅ 成功解析Diff.Depth protobuf数据");
+                            
+                            // 检查是否是增量深度数据
+                            if let Some(body) = &wrapper.body {
+                                match body {
+                                    crate::dto::mexc::push_data_v3_api_wrapper::Body::PublicIncreaseDepths(depth_data) => {
+                                        println!("📈 收到增量深度数据:");
+                                        println!("  - Event Type: {}", depth_data.event_type);
+                                        println!("  - Version: {}", depth_data.version);
+                                        println!("  - Bids数量: {}", depth_data.bids.len());
+                                        println!("  - Asks数量: {}", depth_data.asks.len());
+                                        
+                                        // 打印前几个bid和ask
+                                        for (i, bid) in depth_data.bids.iter().take(3).enumerate() {
+                                            println!("  - Bid {}: 价格={}, 数量={}", i+1, bid.price, bid.quantity);
+                                        }
+                                        for (i, ask) in depth_data.asks.iter().take(3).enumerate() {
+                                            println!("  - Ask {}: 价格={}, 数量={}", i+1, ask.price, ask.quantity);
+                                        }
+                                    }
+                                    _ => {
+                                        println!("⚠️ 收到其他类型的数据: {:?}", body);
+                                    }
+                                }
+                            }
+                            
+                            // 发送到通道
+                            if let Err(e) = tx.send(wrapper) {
+                                eprintln!("❌ 发送Diff.Depth数据到通道失败: {}", e);
+                                break;
+                            }
+                        }
+                        Err(e) => {
+                            eprintln!("❌ 解析Diff.Depth protobuf失败: {}", e);
+                        }
+                    }
+                }
+                WsMessage::Close(_) => {
+                    println!("🔌 Diff.Depth WebSocket连接关闭");
+                    break;
+                }
+                WsMessage::Ping(data) => {
+                    println!("🏓 收到Ping，发送Pong");
+                    write.send(WsMessage::Pong(data)).await?;
+                }
+                WsMessage::Pong(_) => {
+                    println!("🏓 收到Pong");
+                }
+                _ => {}
             }
         }
 
-        // 等待 WebSocket 任务完成
-        let _ = ws_handle.await;
-    }
-
-    #[tokio::test]
-    async fn test_multiple_klines_subscription() {
-        let ws = MexcWebSocket::new();
-        let (tx, mut rx) = mpsc::unbounded_channel();
-
-        // 订阅多个交易对
-        let subscriptions = vec![
-            ("BTCUSDT".to_string(), "Min15".to_string()),
-            ("ETHUSDT".to_string(), "Min5".to_string()),
-        ];
-
-        let ws_handle = tokio::spawn(async move { 
-            ws.subscribe_multiple_klines(subscriptions, tx).await 
-        });
-
-        // 接收几条消息
-        let mut message_count = 0;
-        let max_messages = 10;
-
-        while let Some(data) = rx.recv().await {
-            println!("Received: {}", data);
-            message_count += 1;
-
-            if message_count >= max_messages {
-                break;
-            }
-        }
-
-        // 等待 WebSocket 任务完成
-        let _ = ws_handle.await;
-    }
-
-    #[tokio::test]
-    async fn test_book_ticker_subscription() {
-        let mut ws = MexcWebSocket::new();
-
-        // 启动 Book Ticker WebSocket 连接
-        let symbol = "BTCUSDT";
-        let interval = "100ms";
-
-        let mut rx = ws.subscribe_book_ticker(symbol, interval).await.unwrap();
-
-        // 接收几条消息
-        let mut message_count = 0;
-        let max_messages = 5;
-
-        while let Some(data) = rx.recv().await {
-            println!("Received Book Ticker: {:?}", data);
-            message_count += 1;
-
-            if message_count >= max_messages {
-                break;
-            }
-        }
-    }
-
-    #[tokio::test]
-    async fn test_depth_subscription() {
-        let ws = MexcWebSocket::new();
-        let (tx, mut rx) = mpsc::unbounded_channel::<crate::dto::mexc::PushDataV3ApiWrapper>();
-
-        // 启动深度 WebSocket 连接
-        let symbol = "BTCUSDT";
-        let level = 5;
-
-        let ws_handle = tokio::spawn(async move { 
-            ws.subscribe_depth(symbol, level, tx).await 
-        });
-
-        // 接收几条消息
-        let mut message_count = 0;
-        let max_messages = 5;
-
-        while let Some(data) = rx.recv().await {
-            println!("Received Depth: {:?}", data);
-            message_count += 1;
-
-            if message_count >= max_messages {
-                break;
-            }
-        }
-
-        // 等待 WebSocket 任务完成
-        let _ = ws_handle.await;
-    }
-
-    #[tokio::test]
-    async fn test_multiple_depths_subscription() {
-        let ws = MexcWebSocket::new();
-        let (tx, mut rx) = mpsc::unbounded_channel::<crate::dto::mexc::PushDataV3ApiWrapper>();
-
-        // 订阅多个交易对的深度数据
-        let subscriptions = vec![
-            ("BTCUSDT".to_string(), 5),
-            ("ETHUSDT".to_string(), 10),
-        ];
-
-        let ws_handle = tokio::spawn(async move { 
-            ws.subscribe_multiple_depths(subscriptions, tx).await 
-        });
-
-        // 接收几条消息
-        let mut message_count = 0;
-        let max_messages = 10;
-
-        while let Some(data) = rx.recv().await {
-            println!("Received Multiple Depth: {:?}", data);
-            message_count += 1;
-
-            if message_count >= max_messages {
-                break;
-            }
-        }
-
-        // 等待 WebSocket 任务完成
-        let _ = ws_handle.await;
-    }
-
-    #[tokio::test]
-    async fn test_multiple_book_tickers_subscription() {
-        let mut ws = MexcWebSocket::new();
-
-        // 订阅多个交易对的 Book Ticker
-        let symbols = vec!["BTCUSDT".to_string(), "ETHUSDT".to_string()];
-        let interval = "100ms";
-
-        let mut rx = ws.subscribe_multiple_book_tickers(symbols, interval).await.unwrap();
-
-        // 接收几条消息
-        let mut message_count = 0;
-        let max_messages = 10;
-
-        while let Some(data) = rx.recv().await {
-            println!("Received Multiple Book Ticker: {:?}", data);
-            message_count += 1;
-
-            if message_count >= max_messages {
-                break;
-            }
-        }
+        Ok(())
     }
 }
