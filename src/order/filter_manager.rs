@@ -197,6 +197,24 @@ impl SignalManager {
             false
         };
 
+        // 检查是否为止损触发信号
+        let is_stop_loss_triggered = if let Signal::Market(market_signal) = &signal.signal {
+            market_signal.is_stop_loss_triggered
+        } else {
+            false
+        };
+
+        if is_stop_loss_triggered {
+            // 止损触发：重置仓位状态，但不执行实际交易
+            self.position_manager.remove_position_by_signal(&signal);
+            tracing::info!(
+                "🛑 止损触发信号处理: 策略 {:?}, 交易对: {}, 重置仓位状态",
+                strategy,
+                signal.symbol
+            );
+            return Ok(()); // 直接返回，不执行订单
+        }
+
         let original_position = if is_closing_signal {
             // 平仓信号：先保存原始仓位，然后清零
             let current_position = self.position_manager.get_position_quantity_by_signal(&signal);

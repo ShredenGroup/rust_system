@@ -22,6 +22,7 @@ pub struct MarketSignal {
     pub stop_price: Option<f64>,
     pub profit_price: Option<f64>,
     pub is_closed: bool,
+    pub is_stop_loss_triggered: bool,  // 新增：止损触发标志
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -118,6 +119,32 @@ impl TradingSignal {
     pub fn timestamp(&self) -> u64 {
         self.timestamp
     }
+    
+    /// 创建止损触发信号
+    /// 用于通知风控层止损已触发，需要重置仓位状态
+    pub fn new_stop_loss_triggered_signal(
+        id: u32,
+        symbol: String,
+        strategy: StrategyName,
+        exchange: Exchange,
+        latest_price: f64,
+    ) -> Self {
+        let mut market_signal = MarketSignal::new(Side::Buy, None, None); // side不重要
+        market_signal.is_stop_loss_triggered = true; // 标记为止损触发
+        
+        Self {
+            id,
+            symbol,
+            strategy,
+            quantity: 0.0, // 止损触发信号不需要数量
+            side: Side::Buy, // 不重要
+            signal: Signal::Market(market_signal),
+            latest_price,
+            exchange,
+            data_timestamp: get_timestamp_ms() as u32,
+            timestamp: get_timestamp_ms(),
+        }
+    }
 }
 
 impl SignalTs for TradingSignal {
@@ -133,6 +160,7 @@ impl MarketSignal {
             stop_price,
             profit_price,
             is_closed: false,
+            is_stop_loss_triggered: false,
         }
     }
 

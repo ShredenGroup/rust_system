@@ -3,6 +3,7 @@ use hmac::{Hmac, Mac};
 use std::num::ParseIntError;
 use sha2::Sha256;
 use std::time::{SystemTime, UNIX_EPOCH};
+use std::num::ParseFloatError;
 /// # HMAC-SHA256 签名生成器
 ///
 /// 使用 HMAC-SHA256 算法为给定的查询字符串生成一个签名。
@@ -86,6 +87,10 @@ pub fn align_price_precision(reference_price: f64, target_price: f64) -> f64 {
 pub fn f2u(data: f64) -> u64 {
     // 使用 round() 确保四舍五入，然后转换为 u64
     (data * PARSE_DECIMAL) as u64
+}
+#[inline]
+pub fn s2u(input: &str) -> Result<u64, ParseFloatError> {
+    input.parse::<f64>().map(|item|f2u(item))
 }
 #[cfg(test)]
 mod tests {

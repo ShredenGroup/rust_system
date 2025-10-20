@@ -1,39 +1,26 @@
-use crate::common::utils::{f2u,s2u};
+use futures::future::ok;
+
+use crate::common::enums::Exchange;
 use crate::dto::mexc::PushDataV3ApiWrapper;
-use crate::models::{Side, TradingSymbol, Exchange};
+use crate::models::{Side, TradingSymbol};
 use std::collections::VecDeque;
 use std::sync::Arc;
-use std::num::ParseFloatError;
-///best bid and and ask order   #[derive(Debug, Copy, Clone)]
+use crate::common::utils::f2u;
+///best bid and and ask order   
+#[derive(Debug, Copy, Clone)]
 pub struct OrderTick {
     pub best_bid_price: u64,
     pub best_ask_price: u64,
     pub best_bid_quantity: u64,
     pub best_ask_quantity: u64,
-    pub exchange:Exchange,
-    pub symbol: TradingSymbol,
     pub timestamp: u64,
 }
 
 impl OrderTick {
-    pub fn new_from_mexc(data: PushDataV3ApiWrapper) -> Result<Self, ParseFloatError> {
+    fn new_from_mexc(data: PushDataV3ApiWrapper)  {
         if let Some(order_tick) = data.extract_latest_book_ticker_data() {
-            let best_bid_price = s2u(&order_tick.bid_price)?;
-            let best_ask_price = s2u(&order_tick.ask_price)?;
-            let best_bid_quantity = s2u(&order_tick.bid_quantity)?;
-            let best_ask_quantity = s2u(&order_tick.ask_quantity)?;
-            
-            Ok(Self {
-                best_bid_price,
-                best_ask_price,
-                best_bid_quantity,
-                best_ask_quantity,
-                exchange: Exchange::Mexc,
-                symbol: data.symbol.unwrap_or(TradingSymbol::BTCUSDT.to_string()).parse().unwrap_or(TradingSymbol::BTCUSDT),
-                timestamp: data.create_time.unwrap_or(0) as u64,
-            })
-        } else {
-            Err("No book ticker data available".parse::<f64>().unwrap_err())
+            let best_bid_price=f2u(order_tick.bid_price.parse()::<f64>.unwrap_or(0.0));
+                
         }
     }
 }
@@ -82,7 +69,7 @@ impl TradeTickBuffer {
     }
 
     /// 获取指定时间范围内的交易
-    pub fn get_trades_in_range(&self, start_time: u64, end_time: u64) -> Vec<Arc<TradeTick>> {
+    pub fn get_trades_in_range(&self, start_time: i64, end_time: i64) -> Vec<Arc<TradeTick>> {
         self.trades
             .iter()
             .filter(|trade| trade.timestamp >= start_time && trade.timestamp <= end_time)

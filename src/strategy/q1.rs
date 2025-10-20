@@ -109,13 +109,22 @@ impl Q1Strategy {
                     signal_log!(warn, "🛑 Q1策略止损触发: 交易对={}, 开仓价={:.8}, 当前价={:.8}, 止损价={:.8}", 
                         self.symbol.as_str(), self.entry_price, close_price, stop_price);
                     
-                    // 止损单已经在交易所层面执行，策略只需要重置状态
+                    // 发送止损触发信号给风控层
+                    let stop_loss_signal = TradingSignal::new_stop_loss_triggered_signal(
+                        0, // 使用默认ID，因为Q1Strategy没有signal_id字段
+                        self.symbol.to_string(), // 将TradingSymbol转换为String
+                        StrategyName::TURTLE, // 使用TURTLE，因为Q1策略在其他地方也使用这个
+                        Exchange::Binance,
+                        close_price,
+                    );
+                    
+                    // 重置策略状态
                     self.current_signal = 0;
                     self.last_price = close_price;
                     self.last_stop_price = None; // 清空止损价格
                     
-                    // 不返回平仓信号，因为止损单已经自动执行
-                    return None;
+                    // 返回止损触发信号
+                    return Some(stop_loss_signal);
                 }
             }
             
