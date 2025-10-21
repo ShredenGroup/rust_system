@@ -17,7 +17,7 @@ pub struct OrderTick {
 
 impl OrderTick {
     pub fn new_from_mexc(data: PushDataV3ApiWrapper) -> Result<Self, ParseFloatError> {
-        if let Some(order_tick) = data.extract_latest_book_ticker_data() {
+        if let Some(order_tick) = data.extract_book_ticker_data() {
             let best_bid_price = s2u(&order_tick.bid_price)?;
             let best_ask_price = s2u(&order_tick.ask_price)?;
             let best_bid_quantity = s2u(&order_tick.bid_quantity)?;
