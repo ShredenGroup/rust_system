@@ -4,6 +4,9 @@ use std::num::ParseIntError;
 use sha2::Sha256;
 use std::time::{SystemTime, UNIX_EPOCH};
 use std::num::ParseFloatError;
+use rust_decimal::Decimal;
+use rust_decimal::prelude::ToPrimitive;
+use std::str::FromStr;
 /// # HMAC-SHA256 签名生成器
 ///
 /// 使用 HMAC-SHA256 算法为给定的查询字符串生成一个签名。
@@ -86,11 +89,58 @@ pub fn align_price_precision(reference_price: f64, target_price: f64) -> f64 {
 #[inline]
 pub fn f2u(data: f64) -> u64 {
     // 使用 round() 确保四舍五入，然后转换为 u64
-    (data * PARSE_DECIMAL) as u64
+    (data * PARSE_DECIMAL).round() as u64
 }
+#[inline]
+pub fn s2u_custom(input: &str) -> Result<u64, ParseFloatError> {
+    // 高性能版本：避免 Vec 分配，直接解析
+    if let Some(dot_pos) = input.find('.') {
+        // 有小数点的情况
+        let integer_part = &input[..dot_pos];
+        let decimal_part = &input[dot_pos + 1..];
+        
+        let integer = integer_part.parse::<u64>().unwrap_or(0);
+        let decimal_len = decimal_part.len();
+        
+        if decimal_len == 0 {
+            Ok(integer * PARSE_DECIMAL as u64)
+        } else if decimal_len <= 8 {
+            // 直接解析小数部分
+            let decimal = decimal_part.parse::<u64>().unwrap_or(0);
+            let multiplier = 10_u64.pow(8 - decimal_len as u32);
+            Ok(integer * PARSE_DECIMAL as u64 + decimal * multiplier)
+        } else {
+            // 超过8位小数，截断
+            let truncated = &decimal_part[..8];
+            let decimal = truncated.parse::<u64>().unwrap_or(0);
+            Ok(integer * PARSE_DECIMAL as u64 + decimal)
+        }
+    } else {
+        // 没有小数点，直接解析整数
+        Ok(input.parse::<u64>().unwrap_or(0) * PARSE_DECIMAL as u64)
+    }
+}
+
 #[inline]
 pub fn s2u(input: &str) -> Result<u64, ParseFloatError> {
     input.parse::<f64>().map(|item|f2u(item))
+}
+
+#[inline]
+pub fn s2u_decimal_fast(input: &str) -> Result<u64, ParseFloatError> {
+    // 使用 Decimal 快速解析，避免精度损失
+    let decimal = Decimal::from_str(input).unwrap_or(Decimal::ZERO);
+    let mantissa = decimal.mantissa();
+    let scale = decimal.scale();
+    
+    if scale <= 8 {
+        let multiplier = 10_u64.pow(8 - scale as u32);
+        Ok(mantissa as u64 * multiplier)
+    } else {
+        // 超过8位小数，截断到8位
+        let truncated_multiplier = 10_u64.pow(8);
+        Ok((mantissa as u64) / 10_u64.pow((scale - 8) as u32) * truncated_multiplier)
+    }
 }
 #[cfg(test)]
 mod tests {
