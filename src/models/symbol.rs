@@ -105,7 +105,7 @@ impl TradingSymbol {
             TradingSymbol::UNIUSDT => SymbolPrecision::new(3, 2),  // 价格3位，数量2位
             TradingSymbol::PEPEUSDT => SymbolPrecision::new(7, 0), // 价格8位，数量0位
             TradingSymbol::NEIROUSDT => SymbolPrecision::new(7, 0), // 价格7位，数量0位
-            TradingSymbol::ONDOUSDT => SymbolPrecision::new(4, 1), // 价格4位，数量0位
+            TradingSymbol::ONDOUSDT => SymbolPrecision::new(4, 1), // 价格4位，数量1位
             TradingSymbol::AAVEUSDT => SymbolPrecision::new(2, 1), // 价格2位，数量1位
             TradingSymbol::ASTERUSDT => SymbolPrecision::new(4, 0), // 价格4位，数量0位
             TradingSymbol::TAOUSDT => SymbolPrecision::new(2, 3), // 价格2位，数量3位
