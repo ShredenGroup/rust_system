@@ -1,5 +1,5 @@
 use crate::common::consts::BINANCE_WS;
-use crate::dto::binance::websocket::{MarkPriceData, DepthUpdateData, KlineData, BookTickerData};
+use crate::dto::binance::websocket::{MarkPriceData, BinanceDepth, KlineData, BookTickerData};
 use anyhow::Result;
 use futures::StreamExt;
 use serde_json;
@@ -91,7 +91,7 @@ impl BinanceWebSocket {
         &self,
         symbol: &str,
         interval: &str,
-        tx: mpsc::UnboundedSender<DepthUpdateData>,
+        tx: mpsc::UnboundedSender<BinanceDepth>,
     ) -> Result<()> {
         let stream_name = if interval == "250ms" {
             format!("{}@depth", symbol)
@@ -113,7 +113,7 @@ impl BinanceWebSocket {
         while let Some(msg) = read.next().await {
             match msg? {
                 Message::Text(text) => {
-                    if let Ok(data) = serde_json::from_str::<DepthUpdateData>(&text) {
+                    if let Ok(data) = serde_json::from_str::<BinanceDepth>(&text) {
                         if let Err(e) = tx.send(data) {
                             websocket_log!(warn, "Failed to send depth message: {}", e);
                             break;
@@ -198,7 +198,7 @@ impl BinanceWebSocket {
         &self,
         symbols: &[String],
         interval: &str,
-        tx: mpsc::UnboundedSender<DepthUpdateData>,
+        tx: mpsc::UnboundedSender<BinanceDepth>,
     ) -> Result<()> {
         let stream_names: Vec<String> = symbols
             .iter()
@@ -226,7 +226,7 @@ impl BinanceWebSocket {
         while let Some(msg) = read.next().await {
             match msg? {
                 Message::Text(text) => {
-                    if let Ok(data) = serde_json::from_str::<DepthUpdateData>(&text) {
+                    if let Ok(data) = serde_json::from_str::<BinanceDepth>(&text) {
                         if let Err(e) = tx.send(data) {
                             websocket_log!(warn, "Failed to send depth message: {}", e);
                             break;
@@ -242,6 +242,150 @@ impl BinanceWebSocket {
                 }
                 Message::Pong(_) => {
                     websocket_log!(debug, "Received pong from multiple depth streams");
+                }
+                _ => {}
+            }
+        }
+
+        Ok(())
+    }
+
+    /// 订阅 Partial Book Depth Stream
+    ///
+    /// # Arguments
+    /// * `symbol` - 交易对符号，如 "btcusdt"
+    /// * `levels` - 深度档位，支持 5, 10, 20
+    /// * `interval` - 更新间隔，可选 "500ms" 或 "100ms"，默认 250ms
+    /// * `tx` - 消息发送通道
+    pub async fn subscribe_partial_depth(
+        &self,
+        symbol: &str,
+        levels: u8,
+        interval: Option<&str>,
+        tx: mpsc::UnboundedSender<BinanceDepth>,
+    ) -> Result<()> {
+        // 验证 levels 参数
+        if !matches!(levels, 5 | 10 | 20) {
+            return Err(anyhow::anyhow!("Invalid levels: {}. Must be 5, 10, or 20", levels));
+        }
+
+        let stream_name = match interval {
+            Some(interval) => {
+                if !matches!(interval, "500ms" | "100ms") {
+                    return Err(anyhow::anyhow!("Invalid interval: {}. Must be '500ms' or '100ms'", interval));
+                }
+                format!("{}@depth{}@{}", symbol, levels, interval)
+            }
+            None => format!("{}@depth{}", symbol, levels),
+        };
+
+        let ws_url = format!("{}/{}", self.base_url, stream_name);
+
+        websocket_log!(info, "Connecting to Partial Depth WebSocket: {}", ws_url);
+
+        let url = Url::parse(&ws_url)?;
+        let (ws_stream, _) = connect_async(url).await?;
+
+        websocket_log!(info, "Partial Depth WebSocket connected successfully");
+
+        let (_, mut read) = ws_stream.split();
+
+        while let Some(msg) = read.next().await {
+            match msg? {
+                Message::Text(text) => {
+                    if let Ok(data) = serde_json::from_str::<BinanceDepth>(&text) {
+                        if let Err(e) = tx.send(data) {
+                            websocket_log!(warn, "Failed to send partial depth message: {}", e);
+                            break;
+                        }
+                    } else {
+                        websocket_log!(warn, "Failed to parse partial depth message: {}", text);
+                    }
+                }
+                Message::Close(_) => {
+                    websocket_log!(warn, "Partial depth WebSocket connection closed");
+                    break;
+                }
+                Message::Ping(_) => {
+                    websocket_log!(debug, "Received ping from partial depth stream");
+                }
+                Message::Pong(_) => {
+                    websocket_log!(debug, "Received pong from partial depth stream");
+                }
+                _ => {}
+            }
+        }
+
+        Ok(())
+    }
+
+    /// 订阅多个交易对的 Partial Book Depth Stream
+    ///
+    /// # Arguments
+    /// * `symbols` - 交易对符号列表
+    /// * `levels` - 深度档位，支持 5, 10, 20
+    /// * `interval` - 更新间隔，可选 "500ms" 或 "100ms"，默认 250ms
+    /// * `tx` - 消息发送通道
+    pub async fn subscribe_multiple_partial_depths(
+        &self,
+        symbols: &[String],
+        levels: u8,
+        interval: Option<&str>,
+        tx: mpsc::UnboundedSender<BinanceDepth>,
+    ) -> Result<()> {
+        // 验证 levels 参数
+        if !matches!(levels, 5 | 10 | 20) {
+            return Err(anyhow::anyhow!("Invalid levels: {}. Must be 5, 10, or 20", levels));
+        }
+
+        let stream_names: Vec<String> = symbols
+            .iter()
+            .map(|symbol| {
+                match interval {
+                    Some(interval) => {
+                        if !matches!(interval, "500ms" | "100ms") {
+                            panic!("Invalid interval: {}. Must be '500ms' or '100ms'", interval);
+                        }
+                        format!("{}@depth{}@{}", symbol, levels, interval)
+                    }
+                    None => format!("{}@depth{}", symbol, levels),
+                }
+            })
+            .collect();
+
+        let combined_stream = stream_names.join("/");
+        let ws_url = format!("{}/{}", self.base_url, combined_stream);
+
+        websocket_log!(info, "Connecting to multiple partial depth streams: {}", ws_url);
+
+        let url = Url::parse(&ws_url)?;
+        let (ws_stream, _) = connect_async(url).await?;
+
+        websocket_log!(info, "Multiple partial depth streams connected successfully");
+
+        let (_, mut read) = ws_stream.split();
+
+        while let Some(msg) = read.next().await {
+            match msg? {
+                Message::Text(text) => {
+                    if let Ok(data) = serde_json::from_str::<BinanceDepth>(&text) {
+                        if let Err(e) = tx.send(data) {
+                            websocket_log!(warn, "Failed to send partial depth message: {}", e);
+                            break;
+                        }
+                    } else {
+                        websocket_log!(warn, "Failed to parse partial depth message: {}", text);
+                    }
+                }
+                Message::Close(_) => {
+                    websocket_log!(warn, "Multiple partial depth WebSocket connection closed");
+                    break;
+                }
+                Message::Ping(_) => {
+                    websocket_log!(debug, "Received ping from multiple partial depth streams");
+                }
+                Message::Pong(_) => {
+                    websocket_log!(debug, "Received pong from multiple partial depth streams");
                 }
                 _ => {}
             }
@@ -573,7 +717,7 @@ impl BinanceWebSocket {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::dto::binance::websocket::DepthUpdateData;
+    use crate::dto::binance::websocket::BinanceDepth;
     use tokio::sync::mpsc;
 
     #[tokio::test]
@@ -646,7 +790,7 @@ mod tests {
             "a": [["2521.13", "37.315"]]
         }"#;
 
-        let data: DepthUpdateData = serde_json::from_str(json_str).unwrap();
+        let data: BinanceDepth = serde_json::from_str(json_str).unwrap();
 
         assert_eq!(data.symbol.as_str(), "ETHUSDT");
         assert_eq!(data.event_type, "depthUpdate");

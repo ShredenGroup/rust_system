@@ -38,7 +38,7 @@ pub struct MarkPriceData {
 /// 深度更新数据 - 使用 serde_with 自动转换价格和数量
 #[serde_as]
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct DepthUpdateData {
+pub struct BinanceDepth {
     #[serde(rename = "e")]
     pub event_type: String, // "depthUpdate"
 
@@ -69,7 +69,7 @@ pub struct DepthUpdateData {
     pub asks: Vec<[f64; 2]>, // Asks to be updated [price, quantity] (auto-converted from strings)
 }
 
-impl DepthUpdateData {
+impl BinanceDepth {
     /// 获取最佳买价
     pub fn best_bid(&self) -> Option<f64> {
         self.bids.first().map(|bid| bid[0])
@@ -553,7 +553,7 @@ mod tests {
             "a": [["2521.13", "37.315"], ["2521.14", "50.0"]]
         }"#;
 
-        let data: DepthUpdateData = serde_json::from_str(json_str).unwrap();
+        let data: BinanceDepth = serde_json::from_str(json_str).unwrap();
 
         assert_eq!(data.symbol.as_str(), "ETHUSDT");
         assert_eq!(data.event_type, "depthUpdate");

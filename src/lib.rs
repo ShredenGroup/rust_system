@@ -6,3 +6,4 @@ pub mod strategy;
 pub mod order;
 pub mod factory;
 pub mod models;
+pub mod middle_processor;

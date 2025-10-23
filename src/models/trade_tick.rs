@@ -1,45 +1,10 @@
 use crate::common::utils::{f2u,s2u};
-use crate::dto::mexc::PushDataV3ApiWrapper;
 use crate::models::{Side, TradingSymbol, Exchange};
 use std::collections::VecDeque;
-use std::sync::Arc;
 use std::num::ParseFloatError;
-///best bid and and ask order   #[derive(Debug, Copy, Clone)]
-pub struct OrderTick {
-    pub best_bid_price: u64,
-    pub best_ask_price: u64,
-    pub best_bid_quantity: u64,
-    pub best_ask_quantity: u64,
-    pub exchange:Exchange,
-    pub symbol: TradingSymbol,
-    pub timestamp: u64,
-}
-
-impl OrderTick {
-    pub fn new_from_mexc(data: PushDataV3ApiWrapper) -> Result<Self, ParseFloatError> {
-        if let Some(order_tick) = data.extract_book_ticker_data() {
-            let best_bid_price = s2u(&order_tick.bid_price)?;
-            let best_ask_price = s2u(&order_tick.ask_price)?;
-            let best_bid_quantity = s2u(&order_tick.bid_quantity)?;
-            let best_ask_quantity = s2u(&order_tick.ask_quantity)?;
-            
-            Ok(Self {
-                best_bid_price,
-                best_ask_price,
-                best_bid_quantity,
-                best_ask_quantity,
-                exchange: Exchange::Mexc,
-                symbol: data.symbol.unwrap_or(TradingSymbol::BTCUSDT.to_string()).parse().unwrap_or(TradingSymbol::BTCUSDT),
-                timestamp: data.create_time.unwrap_or(0) as u64,
-            })
-        } else {
-            Err("No book ticker data available".parse::<f64>().unwrap_err())
-        }
-    }
-}
 
 /// 逐笔交易数据结构
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone,Copy)]
 pub struct TradeTick {
     pub trade_id: u64,
     pub symbol: TradingSymbol,
@@ -52,8 +17,9 @@ pub struct TradeTick {
 
 /// 逐笔交易缓冲区
 /// 使用 VecDeque 存储，支持高效的双端操作
+#[derive(Clone)]
 pub struct TradeTickBuffer {
-    trades: VecDeque<Arc<TradeTick>>,
+    trades: VecDeque<TradeTick>,
     max_size: usize,
 }
 
@@ -73,16 +39,16 @@ impl TradeTickBuffer {
             self.trades.pop_front();
         }
 
-        self.trades.push_back(Arc::new(trade));
+        self.trades.push_back(trade);
     }
 
     /// 获取最新的 N 笔交易
-    pub fn get_recent_trades(&self, count: usize) -> Vec<Arc<TradeTick>> {
+    pub fn get_recent_trades(&self, count: usize) -> Vec<TradeTick> {
         self.trades.iter().rev().take(count).cloned().collect()
     }
 
     /// 获取指定时间范围内的交易
-    pub fn get_trades_in_range(&self, start_time: u64, end_time: u64) -> Vec<Arc<TradeTick>> {
+    pub fn get_trades_in_range(&self, start_time: u64, end_time: u64) -> Vec<TradeTick> {
         self.trades
             .iter()
             .filter(|trade| trade.timestamp >= start_time && trade.timestamp <= end_time)
@@ -106,8 +72,16 @@ impl TradeTickBuffer {
     }
 
     /// 获取所有交易（按时间顺序）
-    pub fn get_all_trades(&self) -> Vec<Arc<TradeTick>> {
+    pub fn get_all_trades(&self) -> Vec<TradeTick> {
         self.trades.iter().cloned().collect()
+    }
+
+    /// 克隆整个缓冲区（用于快照）
+    pub fn clone_buffer(&self) -> TradeTickBuffer {
+        TradeTickBuffer {
+            trades: self.trades.clone(),
+            max_size: self.max_size,
+        }
     }
 }
 

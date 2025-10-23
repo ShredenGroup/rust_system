@@ -1,17 +1,174 @@
-pub use crate::models::{CommonDepth, TradeTick, TradeTickBuffer};
+pub use crate::dto::mexc::PushDataV3ApiWrapper;
+pub use crate::dto::binance::websocket::BinanceDepth;
+pub use crate::models::{CommonDepth, OrderTick, OrderTickBuffer, TradeTick, TradeTickBuffer};
 pub use tokio::sync::mpsc;
 
-pub struct MEXCOrderBook {
-    
-}
 pub struct SnapShot {
-    pub binanceDepth: CommonDepth,
-    pub mexcDepth: CommonDepth,
-    pub tradeTick: TradeTickBuffer,
-}
-pub struct SnapshotCreator {
-    rec_common_depth: mpsc::Receiver<CommonDepth>,
-    rec_trade_tick: mpsc::Receiver<TradeTick>,
-    sender_snapshot: mpsc::Sender<SnapShot>,
+    pub binance_depth: CommonDepth,
+    pub mexc_order_tick: OrderTick,
+    pub order_tick: OrderTickBuffer,
+    pub trade_tick: TradeTickBuffer,
 }
 
+pub struct SnapshotCreator {
+    pub rec_mexc_order_tick: mpsc::Receiver<PushDataV3ApiWrapper>,
+    pub rec_binance_depth: mpsc::Receiver<BinanceDepth>,
+    pub rec_order_tick: mpsc::Receiver<OrderTick>,
+    pub rec_trade_tick: mpsc::Receiver<TradeTick>,
+    pub sender_snapshot: mpsc::Sender<SnapShot>,
+}
+
+impl SnapshotCreator {
+    pub fn new(rec_mexc_order_tick: mpsc::Receiver<PushDataV3ApiWrapper>,
+    rec_binance_depth: mpsc::Receiver<BinanceDepth>,
+    rec_order_tick: mpsc::Receiver<OrderTick>,
+    rec_trade_tick: mpsc::Receiver<TradeTick>,
+    sender_snapshot: mpsc::Sender<SnapShot>) -> Self {
+        Self {
+            rec_mexc_order_tick,
+            rec_binance_depth,
+            rec_order_tick,
+            rec_trade_tick,
+            sender_snapshot,
+        }
+    }
+
+    /// 启动快照创建器的主循环
+    /// 
+    /// 处理逻辑：
+    /// 1. TradeTick 数据持续存储到 TradeTickBuffer 中
+    /// 2. OrderTick 数据持续存储到 OrderTickBuffer 中
+    /// 3. MEXC OrderTick 数据持续更新
+    /// 4. 当 BinanceDepth 数据到达时，触发快照创建并发送
+    /// 5. 如果某些数据没有更新，使用旧数据
+    pub async fn run(&mut self) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+        let mut trade_buffer = TradeTickBuffer::new(1000); // 最多存储1000笔交易
+        let mut order_buffer = OrderTickBuffer::new(1000); // 最多存储1000个订单tick
+        let mut latest_mexc_tick: Option<OrderTick> = None;
+        
+        println!("🚀 SnapshotCreator 启动，开始处理数据流...");
+
+        loop {
+            tokio::select! {
+                // 处理 TradeTick 数据
+                trade_tick = self.rec_trade_tick.recv() => {
+                    match trade_tick {
+                        Some(tick) => {
+                            // 将交易数据存储到缓冲区
+                            trade_buffer.push_trade(tick);
+                            println!("📊 收到 TradeTick，当前缓冲区大小: {}", trade_buffer.len());
+                        }
+                        None => {
+                            println!("⚠️ TradeTick 通道已关闭");
+                            break;
+                        }
+                    }
+                }
+
+                // 处理 OrderTick 数据
+                order_tick = self.rec_order_tick.recv() => {
+                    match order_tick {
+                        Some(tick) => {
+                            // 将订单tick数据存储到缓冲区
+                            order_buffer.push_tick(tick);
+                            println!("📈 收到 OrderTick，当前缓冲区大小: {}", order_buffer.len());
+                        }
+                        None => {
+                            println!("⚠️ OrderTick 通道已关闭");
+                            break;
+                        }
+                    }
+                }
+
+                // 处理 MEXC OrderTick 数据
+                mexc_data = self.rec_mexc_order_tick.recv() => {
+                    match mexc_data {
+                        Some(data) => {
+                            // 尝试从 MEXC 数据中提取 OrderTick
+                            match OrderTick::new_from_mexc(data) {
+                                Ok(order_tick) => {
+                                    latest_mexc_tick = Some(order_tick);
+                                    println!("📈 更新 MEXC OrderTick: bid={}, ask={}", 
+                                        latest_mexc_tick.as_ref().unwrap().data.best_bid_price,
+                                        latest_mexc_tick.as_ref().unwrap().data.best_ask_price);
+                                }
+                                Err(e) => {
+                                    println!("❌ 解析 MEXC OrderTick 失败: {}", e);
+                                }
+                            }
+                        }
+                        None => {
+                            println!("⚠️ MEXC OrderTick 通道已关闭");
+                            break;
+                        }
+                    }
+                }
+
+                // 处理 BinanceDepth 数据 - 这是触发快照的关键
+                binance_depth = self.rec_binance_depth.recv() => {
+                    match binance_depth {
+                        Some(depth_data) => {
+                            println!("🎯 收到 BinanceDepth，准备创建快照...");
+                            
+                            // 将 BinanceDepth 转换为 CommonDepth
+                            let common_depth = CommonDepth::new_from_binance(depth_data);
+                            
+                            // 直接克隆当前的交易缓冲区和订单tick缓冲区
+                            let current_trade_buffer = trade_buffer.clone();
+                            let current_order_buffer = order_buffer.clone();
+                            
+                            // 获取最新的 MEXC OrderTick，如果没有则使用默认值
+                            let mexc_tick = latest_mexc_tick.clone().unwrap_or_else(|| {
+                                println!("⚠️ 没有最新的 MEXC OrderTick，使用默认值");
+                                OrderTick {
+                                    data: crate::models::order_tick::OrderTickData {
+                                        best_bid_price: 0,
+                                        best_ask_price: 0,
+                                        best_bid_quantity: 0,
+                                        best_ask_quantity: 0,
+                                    },
+                                    exchange: crate::models::Exchange::Mexc,
+                                    symbol: crate::models::TradingSymbol::BTCUSDT,
+                                    timestamp: 0,
+                                }
+                            });
+                            
+                            // 创建快照
+                            let snapshot = SnapShot {
+                                binance_depth: common_depth,
+                                mexc_order_tick: mexc_tick,
+                                order_tick: current_order_buffer,
+                                trade_tick: current_trade_buffer,
+                            };
+                            
+                            // 发送前打印详细信息
+                            println!("📊 准备发送快照: Binance深度={}档, MEXC tick={}, OrderTick数={}, 交易数={}", 
+                                snapshot.binance_depth.bid_list.len() + snapshot.binance_depth.ask_list.len(),
+                                latest_mexc_tick.is_some(),
+                                snapshot.order_tick.len(),
+                                snapshot.trade_tick.len());
+                            
+                            // 发送快照
+                            match self.sender_snapshot.send(snapshot).await {
+                                Ok(_) => {
+                                    println!("✅ 快照发送成功");
+                                }
+                                Err(e) => {
+                                    println!("❌ 快照发送失败: {}", e);
+                                    break;
+                                }
+                            }
+                        }
+                        None => {
+                            println!("⚠️ BinanceDepth 通道已关闭");
+                            break;
+                        }
+                    }
+                }
+            }
+        }
+
+        println!("🛑 SnapshotCreator 主循环结束");
+        Ok(())
+    }
+}

@@ -1,10 +1,11 @@
 use crate::common::utils::f2u;
-use crate::dto::binance::websocket::DepthUpdateData;
+use crate::dto::binance::websocket::BinanceDepth;
 use crate::dto::mexc::PushDataV3ApiWrapper;
 use crate::models::{Exchange, TradingSymbol};
 use std::collections::BTreeMap;
 type Price = u64;
 type Quantity = u64;
+use ta::Orderbook;
 #[derive(Debug, Clone)]
 pub struct CommonDepth {
     pub bid_list: BTreeMap<Price, Quantity>,
@@ -50,7 +51,7 @@ impl CommonDepth {
         }
     }
 
-    pub fn new_from_binance(data: DepthUpdateData) -> Self {
+    pub fn new_from_binance(data: BinanceDepth) -> Self {
         // 辅助函数：将 Binance 深度数据转换为 BTreeMap
         let depth_to_map = |items: &[[f64; 2]]| {
             items
@@ -75,5 +76,13 @@ impl CommonDepth {
             timestamp: data.transaction_time,
             exchange: Exchange::Binance,
         }
+    }
+}
+impl Orderbook for CommonDepth {
+    fn get_bids_btm(&self) -> &BTreeMap<Price, Quantity> {
+        &self.bid_list
+    }
+    fn get_asks_btm(&self) -> &BTreeMap<Price, Quantity> {
+        &self.ask_list
     }
 }
