@@ -1,5 +1,5 @@
 use crate::common::consts::BINANCE_WS;
-use crate::dto::binance::websocket::{MarkPriceData, BinanceDepth, KlineData, BookTickerData};
+use crate::dto::binance::websocket::{MarkPriceData, BinanceDepth, KlineData, BookTickerData, BinanceTradeData};
 use anyhow::Result;
 use futures::StreamExt;
 use serde_json;
@@ -18,6 +18,11 @@ impl BinanceWebSocket {
     pub fn new() -> Self {
         Self {
             base_url: BINANCE_WS.to_string(),
+        }
+    }
+    pub fn build_from_url(url: &str) -> Self {
+        Self {
+            base_url: url.to_string(),
         }
     }
 
@@ -394,6 +399,113 @@ impl BinanceWebSocket {
         Ok(())
     }
 
+    /// 订阅逐笔成交数据
+    ///
+    /// # Arguments
+    /// * `symbol` - 交易对符号，如 "btcusdt"
+    /// * `tx` - 消息发送通道
+    pub async fn subscribe_trades(
+        &self,
+        symbol: &str,
+        tx: mpsc::UnboundedSender<BinanceTradeData>,
+    ) -> Result<()> {
+        let stream_name = format!("{}@trade", symbol);
+        let ws_url = format!("{}/{}", self.base_url, stream_name);
+
+        websocket_log!(info, "Connecting to Trade WebSocket: {}", ws_url);
+
+        let url = Url::parse(&ws_url)?;
+        let (ws_stream, _) = connect_async(url).await?;
+
+        websocket_log!(info, "Trade WebSocket connected successfully");
+
+        let (_, mut read) = ws_stream.split();
+
+        while let Some(msg) = read.next().await {
+            match msg? {
+                Message::Text(text) => {
+                    if let Ok(data) = serde_json::from_str::<BinanceTradeData>(&text) {
+                        if let Err(e) = tx.send(data) {
+                            websocket_log!(warn, "Failed to send trade message: {}", e);
+                            break;
+                        }
+                    } else {
+                        websocket_log!(warn, "Failed to parse trade message: {}", text);
+                    }
+                }
+                Message::Close(_) => {
+                    websocket_log!(info, "Trade WebSocket connection closed");
+                    break;
+                }
+                Message::Ping(_) => {
+                    websocket_log!(debug, "Received ping from trade stream");
+                }
+                Message::Pong(_) => {
+                    websocket_log!(debug, "Received pong from trade stream");
+                }
+                _ => {}
+            }
+        }
+
+        Ok(())
+    }
+
+    /// 订阅多个交易对的逐笔成交数据
+    ///
+    /// # Arguments
+    /// * `symbols` - 交易对符号列表
+    /// * `tx` - 消息发送通道
+    pub async fn subscribe_multiple_trades(
+        &self,
+        symbols: &[String],
+        tx: mpsc::UnboundedSender<BinanceTradeData>,
+    ) -> Result<()> {
+        let stream_names: Vec<String> = symbols
+            .iter()
+            .map(|symbol| format!("{}@trade", symbol))
+            .collect();
+
+        let combined_stream = stream_names.join("/");
+        let ws_url = format!("{}/{}", self.base_url, combined_stream);
+
+        websocket_log!(info, "Connecting to multiple trade streams: {}", ws_url);
+
+        let url = Url::parse(&ws_url)?;
+        let (ws_stream, _) = connect_async(url).await?;
+
+        websocket_log!(info, "Multiple trade streams connected successfully");
+
+        let (_, mut read) = ws_stream.split();
+
+        while let Some(msg) = read.next().await {
+            match msg? {
+                Message::Text(text) => {
+                    if let Ok(data) = serde_json::from_str::<BinanceTradeData>(&text) {
+                        if let Err(e) = tx.send(data) {
+                            websocket_log!(warn, "Failed to send trade message: {}", e);
+                            break;
+                        }
+                    } else {
+                        websocket_log!(warn, "Failed to parse trade message: {}", text);
+                    }
+                }
+                Message::Close(_) => {
+                    websocket_log!(info, "Multiple trade WebSocket connection closed");
+                    break;
+                }
+                Message::Ping(_) => {
+                    websocket_log!(debug, "Received ping from multiple trade streams");
+                }
+                Message::Pong(_) => {
+                    websocket_log!(debug, "Received pong from multiple trade streams");
+                }
+                _ => {}
+            }
+        }
+
+        Ok(())
+    }
+
     /// 带重连机制的 WebSocket 连接
     pub async fn subscribe_with_reconnect(
         &self,
@@ -643,6 +755,8 @@ impl BinanceWebSocket {
                             websocket_log!(warn, "Failed to send book ticker message: {}", e);
                             break;
                         }
+                    } else {
+                        websocket_log!(warn, "Failed to parse book ticker message: {}", text);
                     }
                 }
                 Message::Close(_) => {

@@ -293,17 +293,17 @@ impl PushTime for KlineData {
 #[serde_as]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct BookTickerData {
-    #[serde(rename = "e")]
-    pub event_type: String, // 事件类型
+    #[serde(rename = "e", skip_serializing_if = "Option::is_none")]
+    pub event_type: Option<String>, // 事件类型 (现货市场可能没有)
     
     #[serde(rename = "u")]
     pub order_book_update_id: u64, // order book updateId
     
-    #[serde(rename = "E")]
-    pub event_time: i64, // event time
+    #[serde(rename = "E", skip_serializing_if = "Option::is_none")]
+    pub event_time: Option<i64>, // event time (现货市场可能没有)
     
-    #[serde(rename = "T")]
-    pub transaction_time: i64, // transaction time
+    #[serde(rename = "T", skip_serializing_if = "Option::is_none")]
+    pub transaction_time: Option<i64>, // transaction time (现货市场可能没有)
     
     #[serde(rename = "s")]
     pub symbol: TradingSymbol, // symbol
@@ -323,6 +323,60 @@ pub struct BookTickerData {
     #[serde_as(as = "DisplayFromStr")]
     #[serde(rename = "A")]
     pub best_ask_qty: f64, // best ask qty (auto-converted from string)
+}
+
+/// Binance 逐笔成交数据结构
+#[serde_as]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct BinanceTradeData {
+    #[serde(rename = "e")]
+    pub event_type: String, // 事件类型 "trade"
+    
+    #[serde(rename = "E")]
+    pub event_time: i64, // 事件时间
+    
+    #[serde(rename = "T")]
+    pub trade_time: i64, // 成交时间
+    
+    #[serde(rename = "s")]
+    pub symbol: TradingSymbol, // 交易对
+    
+    #[serde(rename = "t")]
+    pub trade_id: u64, // 交易ID
+    
+    #[serde_as(as = "DisplayFromStr")]
+    #[serde(rename = "p")]
+    pub price: f64, // 成交价格 (auto-converted from string)
+    
+    #[serde_as(as = "DisplayFromStr")]
+    #[serde(rename = "q")]
+    pub quantity: f64, // 成交数量 (auto-converted from string)
+    
+    #[serde(rename = "X", skip_serializing_if = "Option::is_none")]
+    pub order_type: Option<String>, // 订单类型，如 "MARKET" (期货市场有，现货市场没有)
+    
+    #[serde(rename = "m")]
+    pub is_buyer_maker: bool, // 买方是否为做市方
+    
+    #[serde(rename = "M", skip_serializing_if = "Option::is_none")]
+    pub ignore: Option<bool>, // 忽略字段 (现货市场有)
+}
+
+impl BinanceTradeData {
+    /// 判断是否为买入交易
+    pub fn is_buy(&self) -> bool {
+        !self.is_buyer_maker
+    }
+    
+    /// 判断是否为卖出交易
+    pub fn is_sell(&self) -> bool {
+        self.is_buyer_maker
+    }
+    
+    /// 计算成交金额
+    pub fn amount(&self) -> f64 {
+        self.price * self.quantity
+    }
 }
 
 /// 为 Binance BookTickerData 实现 BookTickerData trait
@@ -348,7 +402,7 @@ impl BookTickerDataTrait for BookTickerData {
     }
     
     fn event_time(&self) -> i64 {
-        self.event_time
+        self.event_time.unwrap_or(0)
     }
     
     fn exchange(&self) -> Exchange {
@@ -358,13 +412,13 @@ impl BookTickerDataTrait for BookTickerData {
 
 impl TransactionTime for BookTickerData {
     fn transaction_time(&self) -> i64 {
-        self.transaction_time
+        self.transaction_time.unwrap_or_else(|| self.event_time.unwrap_or(0))
     }
 }
 
 impl PushTime for BookTickerData {
     fn push_time(&self) -> i64 {
-        self.event_time
+        self.event_time.unwrap_or(0)
     }
 }
 
@@ -589,10 +643,10 @@ mod tests {
 
         let data: BookTickerData = serde_json::from_str(json_str).unwrap();
 
-        assert_eq!(data.event_type, "bookTicker");
+        assert_eq!(data.event_type.as_deref(), Some("bookTicker"));
         assert_eq!(data.order_book_update_id, 400900217);
-        assert_eq!(data.event_time, 1568014460893);
-        assert_eq!(data.transaction_time, 1568014460891);
+        assert_eq!(data.event_time, Some(1568014460893));
+        assert_eq!(data.transaction_time, Some(1568014460891));
         assert_eq!(data.symbol.as_str(), "BNBUSDT");
         assert_eq!(data.best_bid_price, 25.35190000);
         assert_eq!(data.best_bid_qty, 31.21000000);

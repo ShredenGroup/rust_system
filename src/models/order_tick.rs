@@ -1,7 +1,7 @@
 use crate::dto::mexc::PushDataV3ApiWrapper;
 use crate::dto::binance::websocket::BookTickerData;
 use crate::models::{TradingSymbol, Exchange};
-use std::collections::VecDeque;
+use crate::common::ts::TransactionTime;
 use std::num::ParseFloatError;
 
 /// 订单tick的基础数据
@@ -56,7 +56,7 @@ impl OrderTick {
             },
             exchange: Exchange::Binance,
             symbol: data.symbol,
-            timestamp: data.transaction_time as u64,
+            timestamp: data.transaction_time() as u64,
         }
     }
 
@@ -81,10 +81,10 @@ impl OrderTick {
 }
 
 /// OrderTick 缓冲区
-/// 使用 VecDeque 存储，支持高效的双端操作
+/// 使用 Vec 存储，支持高效的数据操作
 #[derive(Clone)]
 pub struct OrderTickBuffer {
-    ticks: VecDeque<OrderTick>,
+    ticks: Vec<OrderTick>,
     max_size: usize,
 }
 
@@ -92,7 +92,7 @@ impl OrderTickBuffer {
     /// 创建新的 OrderTick 缓冲区
     pub fn new(max_size: usize) -> Self {
         Self {
-            ticks: VecDeque::with_capacity(max_size),
+            ticks: Vec::with_capacity(max_size),
             max_size,
         }
     }
@@ -100,21 +100,27 @@ impl OrderTickBuffer {
     /// 添加新的 OrderTick
     pub fn push_tick(&mut self, tick: OrderTick) {
         // 如果缓冲区已满，移除最旧的 tick
-        if self.ticks.len() >= self.max_size {
-            self.ticks.pop_front();
+        if self.ticks.len() < self.max_size {
+            self.ticks.push(tick);
         }
 
-        self.ticks.push_back(tick);
     }
 
-    /// 获取最新的 N 个 OrderTick
-    pub fn get_recent_ticks(&self, count: usize) -> Vec<OrderTick> {
-        self.ticks.iter().rev().take(count).cloned().collect()
+    /// 获取最新的 N 个 OrderTick（返回引用切片，零拷贝，推荐使用）
+    pub fn get_recent_ticks(&self, count: usize) -> &[OrderTick] {
+        let start = self.ticks.len().saturating_sub(count);
+        &self.ticks[start..]
+    }
+
+    /// 获取最新的 N 个 OrderTick（如果必须需要拥有数据）
+    pub fn get_recent_ticks_owned(&self, count: usize) -> Vec<OrderTick> {
+        let start = self.ticks.len().saturating_sub(count);
+        self.ticks[start..].iter().copied().collect()
     }
 
     /// 获取最新的 OrderTick
     pub fn get_latest_tick(&self) -> Option<OrderTick> {
-        self.ticks.back().cloned()
+        self.ticks.last().copied()
     }
 
     /// 获取指定时间范围内的 OrderTick
@@ -143,7 +149,7 @@ impl OrderTickBuffer {
 
     /// 获取所有 OrderTick（按时间顺序）
     pub fn get_all_ticks(&self) -> Vec<OrderTick> {
-        self.ticks.iter().cloned().collect()
+        self.ticks.iter().copied().collect()
     }
 
     /// 计算平均价差
@@ -171,7 +177,7 @@ impl OrderTickBuffer {
 mod tests {
     use super::*;
     use crate::common::enums::Exchange;
-    use crate::models::{Side, TradingSymbol};
+    use crate::models::TradingSymbol;
 
     #[test]
     fn test_order_tick_buffer() {

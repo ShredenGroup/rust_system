@@ -1,5 +1,5 @@
 pub use crate::dto::mexc::PushDataV3ApiWrapper;
-pub use crate::dto::binance::websocket::BinanceDepth;
+pub use crate::dto::binance::websocket::{BinanceDepth, BookTickerData,BinanceTradeData};
 pub use crate::models::{CommonDepth, OrderTick, OrderTickBuffer, TradeTick, TradeTickBuffer};
 pub use tokio::sync::mpsc;
 
@@ -13,16 +13,16 @@ pub struct SnapShot {
 pub struct SnapshotCreator {
     pub rec_mexc_order_tick: mpsc::Receiver<PushDataV3ApiWrapper>,
     pub rec_binance_depth: mpsc::Receiver<BinanceDepth>,
-    pub rec_order_tick: mpsc::Receiver<OrderTick>,
-    pub rec_trade_tick: mpsc::Receiver<TradeTick>,
+    pub rec_order_tick: mpsc::Receiver<BookTickerData>,
+    pub rec_trade_tick: mpsc::Receiver<BinanceTradeData>,
     pub sender_snapshot: mpsc::Sender<SnapShot>,
 }
 
 impl SnapshotCreator {
     pub fn new(rec_mexc_order_tick: mpsc::Receiver<PushDataV3ApiWrapper>,
     rec_binance_depth: mpsc::Receiver<BinanceDepth>,
-    rec_order_tick: mpsc::Receiver<OrderTick>,
-    rec_trade_tick: mpsc::Receiver<TradeTick>,
+    rec_order_tick: mpsc::Receiver<BookTickerData>,
+    rec_trade_tick: mpsc::Receiver<BinanceTradeData>,
     sender_snapshot: mpsc::Sender<SnapShot>) -> Self {
         Self {
             rec_mexc_order_tick,
@@ -53,8 +53,9 @@ impl SnapshotCreator {
                 // 处理 TradeTick 数据
                 trade_tick = self.rec_trade_tick.recv() => {
                     match trade_tick {
-                        Some(tick) => {
-                            // 将交易数据存储到缓冲区
+                        Some(trade_data) => {
+                            // 将 BinanceTradeData 转换为 TradeTick 并存储到缓冲区
+                            let tick = TradeTick::new_from_binance(trade_data);
                             trade_buffer.push_trade(tick);
                             println!("📊 收到 TradeTick，当前缓冲区大小: {}", trade_buffer.len());
                         }
@@ -68,8 +69,9 @@ impl SnapshotCreator {
                 // 处理 OrderTick 数据
                 order_tick = self.rec_order_tick.recv() => {
                     match order_tick {
-                        Some(tick) => {
-                            // 将订单tick数据存储到缓冲区
+                        Some(order_data) => {
+                            // 将 BookTickerData 转换为 OrderTick 并存储到缓冲区
+                            let tick = OrderTick::new_from_binance(order_data);
                             order_buffer.push_tick(tick);
                             println!("📈 收到 OrderTick，当前缓冲区大小: {}", order_buffer.len());
                         }

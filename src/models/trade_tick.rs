@@ -1,15 +1,14 @@
-use crate::common::utils::{f2u,s2u};
-use crate::models::{Side, TradingSymbol, Exchange};
-use std::collections::VecDeque;
-use std::num::ParseFloatError;
+use crate::dto::binance::websocket::BinanceTradeData;
+use crate::models::{Exchange, Side, TradingSymbol};
+use crate::common::utils::f2u;
 
 /// 逐笔交易数据结构
-#[derive(Debug, Clone,Copy)]
+#[derive(Debug, Clone, Copy)]
 pub struct TradeTick {
     pub trade_id: u64,
     pub symbol: TradingSymbol,
-    pub price: f64,
-    pub quantity: f64,
+    pub price: u64,
+    pub quantity: u64,
     pub side: Side,
     pub timestamp: u64,
     pub exchange: Exchange,
@@ -19,7 +18,7 @@ pub struct TradeTick {
 /// 使用 VecDeque 存储，支持高效的双端操作
 #[derive(Clone)]
 pub struct TradeTickBuffer {
-    trades: VecDeque<TradeTick>,
+    trades: Vec<TradeTick>,
     max_size: usize,
 }
 
@@ -27,24 +26,34 @@ impl TradeTickBuffer {
     /// 创建新的交易缓冲区
     pub fn new(max_size: usize) -> Self {
         Self {
-            trades: VecDeque::with_capacity(max_size),
+            trades: Vec::with_capacity(max_size),
             max_size,
         }
     }
 
-    /// 添加新的交易
+    /// 添加新的交易（简单追加，不删除旧数据）
     pub fn push_trade(&mut self, trade: TradeTick) {
-        // 如果缓冲区已满，移除最旧的交易
-        if self.trades.len() >= self.max_size {
-            self.trades.pop_front();
+        if self.trades.len() < self.max_size {
+            self.trades.push(trade);
         }
-
-        self.trades.push_back(trade);
     }
 
-    /// 获取最新的 N 笔交易
-    pub fn get_recent_trades(&self, count: usize) -> Vec<TradeTick> {
-        self.trades.iter().rev().take(count).cloned().collect()
+    /// 获取最新的 N 笔交易（返回引用切片，零拷贝，推荐使用）
+    pub fn get_recent_trades(&self, count: usize) -> &[TradeTick] {
+        let start = self.trades.len().saturating_sub(count);
+        &self.trades[start..]
+    }
+
+    /// 获取最新的 N 笔交易（如果必须需要拥有数据）
+    pub fn get_recent_trades_owned(&self, count: usize) -> Vec<TradeTick> {
+        let start = self.trades.len().saturating_sub(count);
+        self.trades[start..].iter().copied().collect()
+    }
+
+    /// 获取最新的 N 笔交易（返回迭代器，延迟求值）
+    pub fn recent_trades_iter(&self, count: usize) -> impl Iterator<Item = &TradeTick> {
+        let start = self.trades.len().saturating_sub(count);
+        self.trades[start..].iter()
     }
 
     /// 获取指定时间范围内的交易
@@ -87,8 +96,21 @@ impl TradeTickBuffer {
 
 /// 为 TradeTick 实现一些便利方法
 impl TradeTick {
+    /// 从 BinanceTradeData 创建 TradeTick
+    pub fn new_from_binance(data: BinanceTradeData) -> Self {
+        Self {
+            trade_id: data.trade_id,
+            symbol: data.symbol,
+            price: f2u(data.price),
+            quantity: f2u(data.quantity),
+            side: if data.is_buy() { Side::Buy } else { Side::Sell },
+            timestamp: data.trade_time as u64,
+            exchange: Exchange::Binance,
+        }
+    }
+
     /// 计算交易金额
-    pub fn amount(&self) -> f64 {
+    pub fn amount(&self) -> u64 {
         self.price * self.quantity
     }
 
