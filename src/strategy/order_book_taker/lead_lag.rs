@@ -430,6 +430,13 @@ impl LeadLagStrategy {
                                         for (_, error) in &result.failed_orders {
                                             error_log!(error, "   订单失败: code={}, msg={}", error.code, error.msg);
                                         }
+                                    // 若为 -2022（ReduceOnly 被拒绝），当作当前已无持仓，直接清理状态，避免重复重试
+                                    if result.failed_orders.iter().any(|(_, e)| e.code == -2022) {
+                                        order_log!(info, "ℹ️ 收到 -2022（ReduceOnly 被拒绝），视作无仓位，清理状态（多头）");
+                                        self.current_position = TradeDirection::None;
+                                        self.entry_price = None;
+                                        self.open_order_ids.clear();
+                                    }
                                     }
                                 }
                                 Err(e) => {
@@ -513,6 +520,13 @@ impl LeadLagStrategy {
                                         error_log!(error, "❌ 止盈下单失败 - 部分订单失败");
                                         for (_, error) in &result.failed_orders {
                                             error_log!(error, "   订单失败: code={}, msg={}", error.code, error.msg);
+                                        }
+                                        // 若为 -2022（ReduceOnly 被拒绝），当作当前已无持仓，直接清理状态，避免重复重试
+                                        if result.failed_orders.iter().any(|(_, e)| e.code == -2022) {
+                                            order_log!(info, "ℹ️ 收到 -2022（ReduceOnly 被拒绝），视作无仓位，清理状态（空头）");
+                                            self.current_position = TradeDirection::None;
+                                            self.entry_price = None;
+                                            self.open_order_ids.clear();
                                         }
                                     }
                                 }
