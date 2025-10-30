@@ -3,6 +3,7 @@ pub enum Exchange {
     Binance,
     Mexc,
     Okex,
+    Aster,
 }
 
 #[derive(Debug, Clone, PartialEq, Copy, Hash, Eq)]
