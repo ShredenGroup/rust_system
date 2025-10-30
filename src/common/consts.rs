@@ -4,6 +4,7 @@ pub const MEXC_SPOT_URL: &str = "https://api.exc.com";
 pub const BINANCE_WS: &str = "wss://fstream.binance.com/ws";
 pub const BINANCE_WS_SPOT: &str = "wss://stream.binance.com:9443/ws";
 pub const ASTER_WS: &str = "wss://fstream.asterdex.com";
+pub const ASTER_FUTURES_URL: &str = "https://fapi.asterdex.com";
 pub const BTC_USDT_SYMBOL: &str = "BTCUSDT";
 pub const ETH_USDT_SYMBOL: &str = "ETHUSDT";
 pub const SOL_USDT_SYMBOL: &str = "SOLUSDT";

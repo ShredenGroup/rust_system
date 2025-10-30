@@ -1,6 +1,10 @@
 use crate::dto::binance::websocket::BookTickerData as BinanceBookTickerData;
 use crate::dto::aster::websocket::AsterBookTickerData;
+use crate::exchange_api::aster::AsterFuturesApi;
+use crate::dto::aster::rest_api::{OrderRequest, OrderSide, OrderType};
 use tokio::sync::mpsc;
+use std::sync::Arc;
+use crate::{order_log, error_log};
 
 /// 交易方向
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -16,6 +20,11 @@ pub struct LeadLagStrategy {
     binance_ticker_rx: mpsc::Receiver<BinanceBookTickerData>,
     aster_ticker_rx: mpsc::Receiver<AsterBookTickerData>,
     
+    // ASTER API 客户端（用于实盘交易）
+    aster_api: Arc<AsterFuturesApi>,
+    symbol: String,      // 交易对，如 "ASTERUSDT"
+    quantity: String,    // 交易数量
+    
     // 最新的 fair price（用于开仓判断）
     latest_binance_fair_price: Option<f64>,
     latest_aster_fair_price: Option<f64>,
@@ -27,6 +36,7 @@ pub struct LeadLagStrategy {
     // 当前持仓状态
     current_position: TradeDirection,
     entry_price: Option<f64>, // 开仓价格（使用订单簿价格：做多用ask，做空用bid）
+    open_order_ids: Vec<i64>, // 开仓时的订单ID列表（用于管理订单）
     
     // 策略参数
     entry_threshold: f64,  // 入场阈值 0.0003
@@ -40,19 +50,26 @@ impl LeadLagStrategy {
     pub fn new(
         binance_ticker_rx: mpsc::Receiver<BinanceBookTickerData>,
         aster_ticker_rx: mpsc::Receiver<AsterBookTickerData>,
+        aster_api: Arc<AsterFuturesApi>,
+        symbol: String,
+        quantity: String,
     ) -> Self {
         Self {
             binance_ticker_rx,
             aster_ticker_rx,
+            aster_api,
+            symbol,
+            quantity,
             latest_binance_fair_price: None,
             latest_aster_fair_price: None,
             latest_aster_bid_price: None,
             latest_aster_ask_price: None,
             current_position: TradeDirection::None,
             entry_price: None,
-            entry_threshold: 0.0003,
-            stop_loss: 0.0001,
-            take_profit: 0.0003,
+            open_order_ids: Vec::new(),
+            entry_threshold: 0.0005,
+            stop_loss: 0.0005,
+            take_profit: 0.0005,
             max_spread: 0.0001,
         }
     }
@@ -89,19 +106,13 @@ impl LeadLagStrategy {
     }
 
     /// 检查是否有套利机会并执行交易逻辑
-    fn check_and_execute_trade(&mut self) {
+    async fn check_and_execute_trade(&mut self) {
         let binance_price = match self.latest_binance_fair_price {
             Some(p) => p,
             None => return,
         };
         
-        let aster_price = match self.latest_aster_fair_price {
-            Some(p) => p,
-            None => return,
-        };
-
-        // 计算价差
-        let price_diff = binance_price - aster_price;
+        // 不再使用 ASTER 的 fair price 做入场判断
 
         // 检查当前持仓状态
         match self.current_position {
@@ -125,37 +136,218 @@ impl LeadLagStrategy {
                     return;
                 }
                 
-                // Binance fair price > ASTER fair price + 0.0003 -> 在 ASTER 做多（用 ask 价格开仓）
-                if price_diff > self.entry_threshold {
-                    self.current_position = TradeDirection::Long;
-                    self.entry_price = Some(aster_ask); // 做多用 ask 价格
-                    println!("🟢 【开仓】在 ASTER 做多");
-                    println!("   开仓价格 (Ask): {:.5}", aster_ask);
-                    println!("   Binance Fair Price: {:.5}", binance_price);
-                    println!("   ASTER Fair Price: {:.5}", aster_price);
-                    println!("   ASTER 价差: {:.5} (Bid: {:.5}, Ask: {:.5})", aster_spread, aster_bid, aster_ask);
-                    println!("   价差: {:.5} (超过阈值 {:.5})", price_diff, self.entry_threshold);
-                    println!("   止损价格: {:.5} (Ask价格下跌 {:.5})", aster_ask - self.stop_loss, self.stop_loss);
-                    println!("   止盈价格: {:.5} (Ask价格上涨 {:.5})", aster_ask + self.take_profit, self.take_profit);
-                    println!("   ────────────────────────────────────────────────────────");
-                    println!();
+                // Binance fair price > ASTER ask + 阈值 -> 在 ASTER 做多（用 ask 价格开仓）
+                let long_diff = binance_price - aster_ask;
+                if long_diff > self.entry_threshold {
+                    let stop_loss_price = format!("{:.5}", aster_bid - self.stop_loss);
+                    
+                    // 构建批量订单：市价买单 + 止损单
+                    let orders = vec![
+                        // 市价买单
+                        OrderRequest {
+                            symbol: self.symbol.clone(),
+                            side: OrderSide::Buy,
+                            order_type: OrderType::Market,
+                            quantity: Some(self.quantity.clone()),
+                            ..Default::default()
+                        },
+                        // 止损单（市价卖出，触发价为 stop_loss_price）
+                        OrderRequest {
+                            symbol: self.symbol.clone(),
+                            side: OrderSide::Sell,
+                            order_type: OrderType::StopMarket,
+                            quantity: Some(self.quantity.clone()),
+                            stop_price: Some(stop_loss_price.clone()),
+                            reduce_only: Some("true".to_string()),
+                            ..Default::default()
+                        },
+                    ];
+                    
+                    // 执行批量下单
+                    match self.aster_api.batch_orders(orders, None).await {
+                        Ok(result) => {
+                            if result.is_all_success() {
+                                // 保存订单ID
+                                self.open_order_ids = result.successful_orders.iter()
+                                    .map(|o| o.order_id)
+                                    .collect();
+                                
+                                self.current_position = TradeDirection::Long;
+                                self.entry_price = Some(aster_ask);
+                                
+                                println!("🟢 【开仓】在 ASTER 做多 - 实盘下单成功");
+                                println!("   开仓价格 (Ask): {:.5}", aster_ask);
+                                println!("   Binance Fair Price: {:.5}", binance_price);
+                                println!("   ASTER 价差: {:.5} (Bid: {:.5}, Ask: {:.5})", aster_spread, aster_bid, aster_ask);
+                                println!("   价差: {:.5} (Binance Fair - ASTER Ask, 超过阈值 {:.5})", long_diff, self.entry_threshold);
+                                println!("   数量: {}", self.quantity);
+                                println!("   止损价格: {}", stop_loss_price);
+                                println!("   止盈价格: {:.5} (Ask价格上涨 {:.5})", aster_ask + self.take_profit, self.take_profit);
+                                println!("   订单ID: {:?}", self.open_order_ids);
+                                println!("   ────────────────────────────────────────────────────────");
+                                println!();
+                                
+                                order_log!(info, "✅ Lead-Lag 策略开仓成功 - 做多 {} 数量: {}, 订单ID: {:?}", 
+                                    self.symbol, self.quantity, self.open_order_ids);
+                            } else {
+                                error_log!(error, "❌ Lead-Lag 策略开仓失败 - 部分订单失败: 成功{}/{}, 失败{}/{}",
+                                    result.successful_orders.len(), result.total_requested,
+                                    result.failed_orders.len(), result.total_requested);
+                                
+                                // 检查是否有 -2021 错误（订单会立即触发），需要平仓
+                                let mut need_close_position = false;
+                                for (_, error) in &result.failed_orders {
+                                    error_log!(error, "   订单失败: code={}, msg={}", error.code, error.msg);
+                                    if error.code == -2021 {
+                                        // 订单会立即触发，说明可能已经有仓位，需要平仓
+                                        need_close_position = true;
+                                    }
+                                }
+                                
+                                // 如果检测到 -2021 错误，发出平仓请求
+                                if need_close_position {
+                                    error_log!(warn, "⚠️ 检测到 -2021 错误（订单会立即触发），执行紧急平仓");
+                                    
+                                    // 发出平仓单（做多时平仓用卖出）
+                                    let close_order = OrderRequest {
+                                        symbol: self.symbol.clone(),
+                                        side: OrderSide::Sell,
+                                        order_type: OrderType::Market,
+                                        quantity: Some(self.quantity.clone()),
+                                        reduce_only: Some("true".to_string()),
+                                        ..Default::default()
+                                    };
+                                    
+                                    match self.aster_api.batch_orders(vec![close_order], None).await {
+                                        Ok(close_result) => {
+                                            if close_result.is_all_success() {
+                                                order_log!(info, "✅ 紧急平仓成功 - 订单ID: {:?}", 
+                                                    close_result.successful_orders.iter().map(|o| o.order_id).collect::<Vec<_>>());
+                                            } else {
+                                                for (_, error) in &close_result.failed_orders {
+                                                    error_log!(error, "   紧急平仓失败: code={}, msg={}", error.code, error.msg);
+                                                }
+                                            }
+                                        }
+                                        Err(e) => {
+                                            error_log!(error, "❌ 紧急平仓下单失败: {}", e);
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                        Err(e) => {
+                            error_log!(error, "❌ Lead-Lag 策略开仓下单失败: {}", e);
+                        }
+                    }
                 }
-                // ASTER fair price > Binance fair price + 0.0003 -> 在 ASTER 做空（用 bid 价格开仓）
-                else if -price_diff > self.entry_threshold {
-                    self.current_position = TradeDirection::Short;
-                    self.entry_price = Some(aster_bid); // 做空用 bid 价格
-                    println!("🔴 【开仓】在 ASTER 做空");
-                    println!("   开仓价格 (Bid): {:.5}", aster_bid);
-                    println!("   Binance Fair Price: {:.5}", binance_price);
-                    println!("   ASTER Fair Price: {:.5}", aster_price);
-                    println!("   ASTER 价差: {:.5} (Bid: {:.5}, Ask: {:.5})", aster_spread, aster_bid, aster_ask);
-                    println!("   价差: {:.5} (超过阈值 {:.5})", -price_diff, self.entry_threshold);
-                    println!("   止损价格: {:.5} (Bid价格上涨 {:.5})", aster_bid + self.stop_loss, self.stop_loss);
-                    println!("   止盈价格: {:.5} (Bid价格下跌 {:.5})", aster_bid - self.take_profit, self.take_profit);
-                    println!("   ────────────────────────────────────────────────────────");
-                    println!();
+                // ASTER bid > Binance fair price + 阈值 -> 在 ASTER 做空（用 bid 价格开仓）
+                else {
+                    let short_diff = aster_bid - binance_price;
+                    if short_diff > self.entry_threshold {
+                    let stop_loss_price = format!("{:.5}", aster_ask + self.stop_loss);
+                    
+                    // 构建批量订单：市价卖单 + 止损单
+                    let orders = vec![
+                        // 市价卖单
+                        OrderRequest {
+                            symbol: self.symbol.clone(),
+                            side: OrderSide::Sell,
+                            order_type: OrderType::Market,
+                            quantity: Some(self.quantity.clone()),
+                            ..Default::default()
+                        },
+                        // 止损单（市价买入，触发价为 stop_loss_price）
+                        OrderRequest {
+                            symbol: self.symbol.clone(),
+                            side: OrderSide::Buy,
+                            order_type: OrderType::StopMarket,
+                            quantity: Some(self.quantity.clone()),
+                            stop_price: Some(stop_loss_price.clone()),
+                            reduce_only: Some("true".to_string()),
+                            ..Default::default()
+                        },
+                    ];
+                    
+                    // 执行批量下单
+                    match self.aster_api.batch_orders(orders, None).await {
+                        Ok(result) => {
+                            if result.is_all_success() {
+                                // 保存订单ID
+                                self.open_order_ids = result.successful_orders.iter()
+                                    .map(|o| o.order_id)
+                                    .collect();
+                                
+                                self.current_position = TradeDirection::Short;
+                                self.entry_price = Some(aster_bid);
+                                
+                                println!("🔴 【开仓】在 ASTER 做空 - 实盘下单成功");
+                                println!("   开仓价格 (Bid): {:.5}", aster_bid);
+                                println!("   Binance Fair Price: {:.5}", binance_price);
+                                println!("   ASTER 价差: {:.5} (Bid: {:.5}, Ask: {:.5})", aster_spread, aster_bid, aster_ask);
+                                println!("   价差: {:.5} (ASTER Bid - Binance Fair, 超过阈值 {:.5})", short_diff, self.entry_threshold);
+                                println!("   数量: {}", self.quantity);
+                                println!("   止损价格: {}", stop_loss_price);
+                                println!("   止盈价格: {:.5} (Bid价格下跌 {:.5})", aster_bid - self.take_profit, self.take_profit);
+                                println!("   订单ID: {:?}", self.open_order_ids);
+                                println!("   ────────────────────────────────────────────────────────");
+                                println!();
+                                
+                                order_log!(info, "✅ Lead-Lag 策略开仓成功 - 做空 {} 数量: {}, 订单ID: {:?}", 
+                                    self.symbol, self.quantity, self.open_order_ids);
+                            } else {
+                                error_log!(error, "❌ Lead-Lag 策略开仓失败 - 部分订单失败: 成功{}/{}, 失败{}/{}",
+                                    result.successful_orders.len(), result.total_requested,
+                                    result.failed_orders.len(), result.total_requested);
+                                
+                                // 检查是否有 -2021 错误（订单会立即触发），需要平仓
+                                let mut need_close_position = false;
+                                for (_, error) in &result.failed_orders {
+                                    error_log!(error, "   订单失败: code={}, msg={}", error.code, error.msg);
+                                    if error.code == -2021 {
+                                        // 订单会立即触发，说明可能已经有仓位，需要平仓
+                                        need_close_position = true;
+                                    }
+                                }
+                                
+                                // 如果检测到 -2021 错误，发出平仓请求
+                                if need_close_position {
+                                    error_log!(warn, "⚠️ 检测到 -2021 错误（订单会立即触发），执行紧急平仓");
+                                    
+                                    // 发出平仓单（做空时平仓用买入）
+                                    let close_order = OrderRequest {
+                                        symbol: self.symbol.clone(),
+                                        side: OrderSide::Buy,
+                                        order_type: OrderType::Market,
+                                        quantity: Some(self.quantity.clone()),
+                                        reduce_only: Some("true".to_string()),
+                                        ..Default::default()
+                                    };
+                                    
+                                    match self.aster_api.batch_orders(vec![close_order], None).await {
+                                        Ok(close_result) => {
+                                            if close_result.is_all_success() {
+                                                order_log!(info, "✅ 紧急平仓成功 - 订单ID: {:?}", 
+                                                    close_result.successful_orders.iter().map(|o| o.order_id).collect::<Vec<_>>());
+                                            } else {
+                                                for (_, error) in &close_result.failed_orders {
+                                                    error_log!(error, "   紧急平仓失败: code={}, msg={}", error.code, error.msg);
+                                                }
+                                            }
+                                        }
+                                        Err(e) => {
+                                            error_log!(error, "❌ 紧急平仓下单失败: {}", e);
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                        Err(e) => {
+                            error_log!(error, "❌ Lead-Lag 策略开仓下单失败: {}", e);
+                        }
+                    }
                 }
-            }
+            }},
             
             TradeDirection::Long => {
                 // 持有多头仓位，检查止损和止盈
@@ -166,35 +358,80 @@ impl LeadLagStrategy {
                 };
                 
                 if let Some(entry) = self.entry_price {
-                    // 做多：当前 ask 价格相比开仓时的 ask 价格
-                    let price_change = current_ask - entry;
+                    // 计算止损价格（做多：entry_price - stop_loss）
+                    let stop_loss_price = entry - self.stop_loss;
                     
-                    // 止损：ask 价格下跌超过 0.0001
-                    if price_change <= -self.stop_loss {
+                    // 止损判断：当前 ask1 价格低于止损价格
+                    if current_ask <= stop_loss_price {
                         println!("⛔ 【止损平仓】多头仓位止损");
                         println!("   开仓价格 (Ask): {:.5}", entry);
-                        println!("   平仓价格 (Ask): {:.5}", current_ask);
-                        println!("   价格变化: {:.5}", price_change);
-                        println!("   亏损: {:.5}", price_change);
+                        println!("   当前价格 (Ask): {:.5}", current_ask);
+                        println!("   止损价格: {:.5}", stop_loss_price);
+                        println!("   价格变化: {:.5}", current_ask - entry);
+                        println!("   亏损: {:.5}", entry - current_ask);
                         println!("   ────────────────────────────────────────────────────────");
                         println!();
+                        
                         self.current_position = TradeDirection::None;
                         self.entry_price = None;
+                        self.open_order_ids.clear();
                     }
-                    // 止盈：ask 价格上涨超过 0.0003
-                    else if price_change >= self.take_profit {
-                        println!("✅ 【止盈平仓】多头仓位止盈");
-                        println!("   开仓价格 (Ask): {:.5}", entry);
-                        println!("   平仓价格 (Ask): {:.5}", current_ask);
-                        println!("   价格变化: {:.5}", price_change);
-                        println!("   盈利: {:.5}", price_change);
-                        println!("   ────────────────────────────────────────────────────────");
-                        println!();
-                        self.current_position = TradeDirection::None;
-                        self.entry_price = None;
+                    // 止盈：ask 价格上涨超过 0.0003 - 主动发出止盈单并取消所有订单
+                    else {
+                        let price_change = current_ask - entry;
+                        if price_change >= self.take_profit {
+                            // 1. 先取消所有开放订单（包括止损单）
+                            match self.aster_api.cancel_all_open_orders(&self.symbol, None).await {
+                                Ok(_) => {
+                                    order_log!(info, "✅ 止盈操作：成功取消所有开放订单");
+                                }
+                                Err(e) => {
+                                    error_log!(warn, "⚠️ 止盈操作：取消订单失败: {}，继续执行止盈", e);
+                                }
+                            }
+                            
+                            // 2. 发出止盈单（市价卖出）
+                            let take_profit_order = OrderRequest {
+                            symbol: self.symbol.clone(),
+                            side: OrderSide::Sell,
+                            order_type: OrderType::Market,
+                            quantity: Some(self.quantity.clone()),
+                            reduce_only: Some("true".to_string()),
+                            ..Default::default()
+                        };
+                        
+                            match self.aster_api.batch_orders(vec![take_profit_order], None).await {
+                                Ok(result) => {
+                                    if result.is_all_success() {
+                                        println!("✅ 【止盈平仓】多头仓位止盈 - 实盘下单成功");
+                                        println!("   开仓价格 (Ask): {:.5}", entry);
+                                        println!("   平仓价格 (Ask): {:.5}", current_ask);
+                                        println!("   价格变化: {:.5}", price_change);
+                                        println!("   盈利: {:.5}", price_change);
+                                        println!("   订单ID: {:?}", result.successful_orders.iter().map(|o| o.order_id).collect::<Vec<_>>());
+                                        println!("   ────────────────────────────────────────────────────────");
+                                        println!();
+                                        
+                                        order_log!(info, "✅ Lead-Lag 策略止盈成功 - 多头平仓, 盈利: {:.5}", price_change);
+                                        
+                                        self.current_position = TradeDirection::None;
+                                        self.entry_price = None;
+                                        self.open_order_ids.clear();
+                                    } else {
+                                        error_log!(error, "❌ 止盈下单失败 - 部分订单失败");
+                                        for (_, error) in &result.failed_orders {
+                                            error_log!(error, "   订单失败: code={}, msg={}", error.code, error.msg);
+                                        }
+                                    }
+                                }
+                                Err(e) => {
+                                    error_log!(error, "❌ 止盈下单失败: {}", e);
+                                }
+                            }
+                        }
                     }
                 }
-            }
+            },
             
             TradeDirection::Short => {
                 // 持有空头仓位，检查止损和止盈
@@ -205,35 +442,80 @@ impl LeadLagStrategy {
                 };
                 
                 if let Some(entry) = self.entry_price {
-                    // 做空：当前 bid 价格相比开仓时的 bid 价格
-                    let price_change = entry - current_bid; // 做空：价格下跌为盈利
+                    // 计算止损价格（做空：entry_price + stop_loss）
+                    let stop_loss_price = entry + self.stop_loss;
                     
-                    // 止损：bid 价格上涨超过 0.0001（对空头不利）
-                    if price_change <= -self.stop_loss {
+                    // 止损判断：当前 bid1 价格高于止损价格
+                    if current_bid >= stop_loss_price {
                         println!("⛔ 【止损平仓】空头仓位止损");
                         println!("   开仓价格 (Bid): {:.5}", entry);
-                        println!("   平仓价格 (Bid): {:.5}", current_bid);
-                        println!("   价格变化: {:.5}", price_change);
-                        println!("   亏损: {:.5}", -price_change);
+                        println!("   当前价格 (Bid): {:.5}", current_bid);
+                        println!("   止损价格: {:.5}", stop_loss_price);
+                        println!("   价格变化: {:.5}", current_bid - entry);
+                        println!("   亏损: {:.5}", current_bid - entry);
                         println!("   ────────────────────────────────────────────────────────");
                         println!();
+                        
                         self.current_position = TradeDirection::None;
                         self.entry_price = None;
+                        self.open_order_ids.clear();
                     }
-                    // 止盈：bid 价格下跌超过 0.0003（对空头有利）
-                    else if price_change >= self.take_profit {
-                        println!("✅ 【止盈平仓】空头仓位止盈");
-                        println!("   开仓价格 (Bid): {:.5}", entry);
-                        println!("   平仓价格 (Bid): {:.5}", current_bid);
-                        println!("   价格变化: {:.5}", price_change);
-                        println!("   盈利: {:.5}", price_change);
-                        println!("   ────────────────────────────────────────────────────────");
-                        println!();
-                        self.current_position = TradeDirection::None;
-                        self.entry_price = None;
+                    // 止盈：bid 价格下跌超过 0.0003（对空头有利）- 主动发出止盈单并取消所有订单
+                    else {
+                        let price_change = entry - current_bid; // 做空：价格下跌为盈利
+                        if price_change >= self.take_profit {
+                            // 1. 先取消所有开放订单（包括止损单）
+                            match self.aster_api.cancel_all_open_orders(&self.symbol, None).await {
+                                Ok(_) => {
+                                    order_log!(info, "✅ 止盈操作：成功取消所有开放订单");
+                                }
+                                Err(e) => {
+                                    error_log!(warn, "⚠️ 止盈操作：取消订单失败: {}，继续执行止盈", e);
+                                }
+                            }
+                            
+                            // 2. 发出止盈单（市价买入）
+                            let take_profit_order = OrderRequest {
+                                symbol: self.symbol.clone(),
+                                side: OrderSide::Buy,
+                                order_type: OrderType::Market,
+                                quantity: Some(self.quantity.clone()),
+                                reduce_only: Some("true".to_string()),
+                                ..Default::default()
+                            };
+                            
+                            match self.aster_api.batch_orders(vec![take_profit_order], None).await {
+                                Ok(result) => {
+                                    if result.is_all_success() {
+                                        println!("✅ 【止盈平仓】空头仓位止盈 - 实盘下单成功");
+                                        println!("   开仓价格 (Bid): {:.5}", entry);
+                                        println!("   平仓价格 (Bid): {:.5}", current_bid);
+                                        println!("   价格变化: {:.5}", price_change);
+                                        println!("   盈利: {:.5}", price_change);
+                                        println!("   订单ID: {:?}", result.successful_orders.iter().map(|o| o.order_id).collect::<Vec<_>>());
+                                        println!("   ────────────────────────────────────────────────────────");
+                                        println!();
+                                        
+                                        order_log!(info, "✅ Lead-Lag 策略止盈成功 - 空头平仓, 盈利: {:.5}", price_change);
+                                        
+                                        self.current_position = TradeDirection::None;
+                                        self.entry_price = None;
+                                        self.open_order_ids.clear();
+                                    } else {
+                                        error_log!(error, "❌ 止盈下单失败 - 部分订单失败");
+                                        for (_, error) in &result.failed_orders {
+                                            error_log!(error, "   订单失败: code={}, msg={}", error.code, error.msg);
+                                        }
+                                    }
+                                }
+                                Err(e) => {
+                                    error_log!(error, "❌ 止盈下单失败: {}", e);
+                                }
+                            }
+                        }
                     }
                 }
-            }
+            },
         }
     }
 
@@ -267,7 +549,7 @@ impl LeadLagStrategy {
                             self.latest_binance_fair_price = Some(fair_price);
 
                             // 检查交易机会（开仓需要基于 fair price，但需要订单簿价格才能开仓）
-                            self.check_and_execute_trade();
+                            self.check_and_execute_trade().await;
                         }
                         None => {
                             println!("⚠️  Binance bookTicker 通道已关闭");
@@ -294,7 +576,7 @@ impl LeadLagStrategy {
                             self.latest_aster_ask_price = Some(ticker.best_ask_price);
 
                             // 检查交易机会（开仓和止损止盈都需要检查）
-                            self.check_and_execute_trade();
+                            self.check_and_execute_trade().await;
                         }
                         None => {
                             println!("⚠️  ASTER bookTicker 通道已关闭");
