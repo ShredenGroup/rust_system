@@ -37,6 +37,7 @@ pub struct LeadLagStrategy {
     current_position: TradeDirection,
     entry_price: Option<f64>, // 开仓价格（使用订单簿价格：做多用ask，做空用bid）
     open_order_ids: Vec<i64>, // 开仓时的订单ID列表（用于管理订单）
+    entry_count: u64, // 开仓计数器
     
     // 策略参数
     entry_threshold: f64,  // 入场阈值 0.0003
@@ -71,6 +72,7 @@ impl LeadLagStrategy {
             stop_loss: 0.0005,
             take_profit: 0.0005,
             max_spread: 0.0001,
+            entry_count: 0,
         }
     }
 
@@ -174,6 +176,7 @@ impl LeadLagStrategy {
                                 
                                 self.current_position = TradeDirection::Long;
                                 self.entry_price = Some(aster_ask);
+                                self.entry_count += 1;
                                 
                                 println!("🟢 【开仓】在 ASTER 做多 - 实盘下单成功");
                                 println!("   开仓价格 (Ask): {:.5}", aster_ask);
@@ -184,11 +187,13 @@ impl LeadLagStrategy {
                                 println!("   止损价格: {}", stop_loss_price);
                                 println!("   止盈价格: {:.5} (Ask价格上涨 {:.5})", aster_ask + self.take_profit, self.take_profit);
                                 println!("   订单ID: {:?}", self.open_order_ids);
+                                println!("   当前为第 {} 次开仓", self.entry_count);
                                 println!("   ────────────────────────────────────────────────────────");
                                 println!();
                                 
                                 order_log!(info, "✅ Lead-Lag 策略开仓成功 - 做多 {} 数量: {}, 订单ID: {:?}", 
                                     self.symbol, self.quantity, self.open_order_ids);
+                                order_log!(info, "📈 本次为第 {} 次开仓", self.entry_count);
                             } else {
                                 error_log!(error, "❌ Lead-Lag 策略开仓失败 - 部分订单失败: 成功{}/{}, 失败{}/{}",
                                     result.successful_orders.len(), result.total_requested,
@@ -280,6 +285,7 @@ impl LeadLagStrategy {
                                 
                                 self.current_position = TradeDirection::Short;
                                 self.entry_price = Some(aster_bid);
+                                self.entry_count += 1;
                                 
                                 println!("🔴 【开仓】在 ASTER 做空 - 实盘下单成功");
                                 println!("   开仓价格 (Bid): {:.5}", aster_bid);
@@ -290,11 +296,13 @@ impl LeadLagStrategy {
                                 println!("   止损价格: {}", stop_loss_price);
                                 println!("   止盈价格: {:.5} (Bid价格下跌 {:.5})", aster_bid - self.take_profit, self.take_profit);
                                 println!("   订单ID: {:?}", self.open_order_ids);
+                                println!("   当前为第 {} 次开仓", self.entry_count);
                                 println!("   ────────────────────────────────────────────────────────");
                                 println!();
                                 
                                 order_log!(info, "✅ Lead-Lag 策略开仓成功 - 做空 {} 数量: {}, 订单ID: {:?}", 
                                     self.symbol, self.quantity, self.open_order_ids);
+                                order_log!(info, "📈 本次为第 {} 次开仓", self.entry_count);
                             } else {
                                 error_log!(error, "❌ Lead-Lag 策略开仓失败 - 部分订单失败: 成功{}/{}, 失败{}/{}",
                                     result.successful_orders.len(), result.total_requested,
