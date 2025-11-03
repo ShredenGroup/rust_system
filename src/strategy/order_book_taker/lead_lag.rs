@@ -38,6 +38,9 @@ pub struct LeadLagStrategy {
     entry_price: Option<f64>, // 开仓价格（使用订单簿价格：做多用ask，做空用bid）
     open_order_ids: Vec<i64>, // 开仓时的订单ID列表（用于管理订单）
     entry_count: u64, // 开仓计数器
+    // 简单的在途标记，防止并发重复下单
+    is_opening: bool,   // 开仓请求进行中
+    is_closing: bool,   // 平仓（止盈/紧急）进行中
     
     // 策略参数
     entry_threshold: f64,  // 入场阈值 0.0003
@@ -73,6 +76,8 @@ impl LeadLagStrategy {
             take_profit: 0.0005,
             max_spread: 0.0001,
             entry_count: 0,
+            is_opening: false,
+            is_closing: false,
         }
     }
 
@@ -119,6 +124,8 @@ impl LeadLagStrategy {
         // 检查当前持仓状态
         match self.current_position {
             TradeDirection::None => {
+                // 在途保护：若正在开仓/平仓，跳过本次检查
+                if self.is_opening || self.is_closing { return; }
                 // 无持仓，检查开仓机会
                 // 需要同时有 ASTER 的订单簿价格才能开仓
                 let aster_ask = match self.latest_aster_ask_price {
@@ -166,7 +173,9 @@ impl LeadLagStrategy {
                     ];
                     
                     // 执行批量下单
-                    match self.aster_api.batch_orders(orders, None).await {
+                    self.is_opening = true;
+                    let res = self.aster_api.batch_orders(orders, None).await;
+                    match res {
                         Ok(result) => {
                             if result.is_all_success() {
                                 // 保存订单ID
@@ -194,6 +203,7 @@ impl LeadLagStrategy {
                                 order_log!(info, "✅ Lead-Lag 策略开仓成功 - 做多 {} 数量: {}, 订单ID: {:?}", 
                                     self.symbol, self.quantity, self.open_order_ids);
                                 order_log!(info, "📈 本次为第 {} 次开仓", self.entry_count);
+                                self.is_opening = false;
                             } else {
                                 error_log!(error, "❌ Lead-Lag 策略开仓失败 - 部分订单失败: 成功{}/{}, 失败{}/{}",
                                     result.successful_orders.len(), result.total_requested,
@@ -238,11 +248,14 @@ impl LeadLagStrategy {
                                             error_log!(error, "❌ 紧急平仓下单失败: {}", e);
                                         }
                                     }
+                                self.is_opening = false;
                                 }
+                                if !need_close_position { self.is_opening = false; }
                             }
                         }
                         Err(e) => {
                             error_log!(error, "❌ Lead-Lag 策略开仓下单失败: {}", e);
+                            self.is_opening = false;
                         }
                     }
                 }
@@ -275,7 +288,9 @@ impl LeadLagStrategy {
                     ];
                     
                     // 执行批量下单
-                    match self.aster_api.batch_orders(orders, None).await {
+                    self.is_opening = true;
+                    let res = self.aster_api.batch_orders(orders, None).await;
+                    match res {
                         Ok(result) => {
                             if result.is_all_success() {
                                 // 保存订单ID
@@ -303,6 +318,7 @@ impl LeadLagStrategy {
                                 order_log!(info, "✅ Lead-Lag 策略开仓成功 - 做空 {} 数量: {}, 订单ID: {:?}", 
                                     self.symbol, self.quantity, self.open_order_ids);
                                 order_log!(info, "📈 本次为第 {} 次开仓", self.entry_count);
+                                self.is_opening = false;
                             } else {
                                 error_log!(error, "❌ Lead-Lag 策略开仓失败 - 部分订单失败: 成功{}/{}, 失败{}/{}",
                                     result.successful_orders.len(), result.total_requested,
@@ -347,11 +363,14 @@ impl LeadLagStrategy {
                                             error_log!(error, "❌ 紧急平仓下单失败: {}", e);
                                         }
                                     }
+                                self.is_opening = false;
                                 }
+                                if !need_close_position { self.is_opening = false; }
                             }
                         }
                         Err(e) => {
                             error_log!(error, "❌ Lead-Lag 策略开仓下单失败: {}", e);
+                            self.is_opening = false;
                         }
                     }
                 }
@@ -388,6 +407,8 @@ impl LeadLagStrategy {
                     else {
                         let price_change = current_ask - entry;
                         if price_change >= self.take_profit {
+                            if self.is_closing { return; }
+                            self.is_closing = true;
                             // 1. 先取消所有开放订单（包括止损单）
                             match self.aster_api.cancel_all_open_orders(&self.symbol, None).await {
                                 Ok(_) => {
@@ -425,6 +446,7 @@ impl LeadLagStrategy {
                                         self.current_position = TradeDirection::None;
                                         self.entry_price = None;
                                         self.open_order_ids.clear();
+                                        self.is_closing = false;
                                     } else {
                                         error_log!(error, "❌ 止盈下单失败 - 部分订单失败");
                                         for (_, error) in &result.failed_orders {
@@ -436,11 +458,15 @@ impl LeadLagStrategy {
                                         self.current_position = TradeDirection::None;
                                         self.entry_price = None;
                                         self.open_order_ids.clear();
+                                            self.is_closing = false;
+                                        } else {
+                                            self.is_closing = false;
                                     }
                                     }
                                 }
                                 Err(e) => {
                                     error_log!(error, "❌ 止盈下单失败: {}", e);
+                                    self.is_closing = false;
                                 }
                             }
                         }
@@ -479,6 +505,8 @@ impl LeadLagStrategy {
                     else {
                         let price_change = entry - current_bid; // 做空：价格下跌为盈利
                         if price_change >= self.take_profit {
+                            if self.is_closing { return; }
+                            self.is_closing = true;
                             // 1. 先取消所有开放订单（包括止损单）
                             match self.aster_api.cancel_all_open_orders(&self.symbol, None).await {
                                 Ok(_) => {
@@ -516,6 +544,7 @@ impl LeadLagStrategy {
                                         self.current_position = TradeDirection::None;
                                         self.entry_price = None;
                                         self.open_order_ids.clear();
+                                        self.is_closing = false;
                                     } else {
                                         error_log!(error, "❌ 止盈下单失败 - 部分订单失败");
                                         for (_, error) in &result.failed_orders {
@@ -527,11 +556,15 @@ impl LeadLagStrategy {
                                             self.current_position = TradeDirection::None;
                                             self.entry_price = None;
                                             self.open_order_ids.clear();
+                                            self.is_closing = false;
+                                        } else {
+                                            self.is_closing = false;
                                         }
                                     }
                                 }
                                 Err(e) => {
                                     error_log!(error, "❌ 止盈下单失败: {}", e);
+                                    self.is_closing = false;
                                 }
                             }
                         }

@@ -2,6 +2,7 @@ use super::Exchange;
 use ndarray::Array;
 use ndarray::Ix2;
 use super::{StrategyName,TradingSymbol};
+use crate::models::strategy::StrategyContext;
 pub trait ToArray {
     fn to_ndarray(&self) -> Array<f32, Ix2>;
 }
@@ -107,4 +108,7 @@ pub trait SymbolSetter {
         self.set_symbol(symbol);
         self
     }
+}
+pub trait StrategyContextTrait{
+    fn strategy_context(&self) -> StrategyContext;
 }

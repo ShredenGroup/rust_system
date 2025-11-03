@@ -23,7 +23,7 @@ pub enum OrderStutus {
     Canceled,
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum PositionSide {
     Long = 1,
     Short = 2,
