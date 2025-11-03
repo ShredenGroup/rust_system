@@ -115,10 +115,6 @@ impl SnapshotCreator {
                             // 将 BinanceDepth 转换为 CommonDepth
                             let common_depth = CommonDepth::new_from_binance(depth_data);
                             
-                            // 直接克隆当前的交易缓冲区和订单tick缓冲区
-                            let current_trade_buffer = trade_buffer.clone();
-                            let current_order_buffer = order_buffer.clone();
-                            
                             // 获取最新的 MEXC OrderTick，如果没有则使用默认值
                             let mexc_tick = latest_mexc_tick.clone().unwrap_or_else(|| {
                                 println!("⚠️ 没有最新的 MEXC OrderTick，使用默认值");
@@ -135,12 +131,12 @@ impl SnapshotCreator {
                                 }
                             });
                             
-                            // 创建快照
+                            // 创建快照，直接移动缓冲区所有权（不克隆）
                             let snapshot = SnapShot {
                                 binance_depth: common_depth,
                                 mexc_order_tick: mexc_tick,
-                                order_tick: current_order_buffer,
-                                trade_tick: current_trade_buffer,
+                                order_tick: order_buffer,  // 直接移动所有权
+                                trade_tick: trade_buffer,  // 直接移动所有权
                             };
                             
                             // 发送前打印详细信息
@@ -154,6 +150,9 @@ impl SnapshotCreator {
                             match self.sender_snapshot.send(snapshot).await {
                                 Ok(_) => {
                                     println!("✅ 快照发送成功");
+                                    // 发送后重新创建新的缓冲区来继续接收数据
+                                    trade_buffer = TradeTickBuffer::new(1000);
+                                    order_buffer = OrderTickBuffer::new(1000);
                                 }
                                 Err(e) => {
                                     println!("❌ 快照发送失败: {}", e);

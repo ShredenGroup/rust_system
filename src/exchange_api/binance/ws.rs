@@ -118,10 +118,19 @@ impl BinanceWebSocket {
         while let Some(msg) = read.next().await {
             match msg? {
                 Message::Text(text) => {
-                    if let Ok(data) = serde_json::from_str::<BinanceDepth>(&text) {
-                        if let Err(e) = tx.send(data) {
-                            websocket_log!(warn, "Failed to send depth message: {}", e);
-                            break;
+                    websocket_log!(debug, "Received Depth message, length: {}", text.len());
+                    match serde_json::from_str::<BinanceDepth>(&text) {
+                        Ok(data) => {
+                            if let Err(e) = tx.send(data) {
+                                websocket_log!(warn, "Failed to send depth message: {}", e);
+                                break;
+                            } else {
+                                websocket_log!(debug, "Depth message sent successfully");
+                            }
+                        }
+                        Err(e) => {
+                            websocket_log!(warn, "Failed to parse Depth message: {}", e);
+                            websocket_log!(debug, "Failed message content: {}", text);
                         }
                     }
                 }

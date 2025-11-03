@@ -73,7 +73,7 @@ impl CommonDepth {
             bid_list: depth_to_map(&data.bids),
             ask_list: depth_to_map(&data.asks),
             symbol: data.symbol,
-            timestamp: data.transaction_time,
+            timestamp: data.transaction_time.unwrap_or(data.event_time),
             exchange: Exchange::Binance,
         }
     }

@@ -45,8 +45,8 @@ pub struct BinanceDepth {
     #[serde(rename = "E")]
     pub event_time: i64, // Event time
 
-    #[serde(rename = "T")]
-    pub transaction_time: i64, // Transaction time
+    #[serde(rename = "T", default)]
+    pub transaction_time: Option<i64>, // Transaction time (可选，某些流可能没有)
 
     #[serde(rename = "s")]
     pub symbol: TradingSymbol, // Symbol
@@ -57,8 +57,8 @@ pub struct BinanceDepth {
     #[serde(rename = "u")]
     pub final_update_id: i64, // Final update ID in event
 
-    #[serde(rename = "pu")]
-    pub prev_final_update_id: i64, // Final update Id in last stream
+    #[serde(rename = "pu", default)]
+    pub prev_final_update_id: Option<i64>, // Final update Id in last stream (可选)
 
     #[serde(rename = "b")]
     #[serde_as(as = "Vec<[DisplayFromStr; 2]>")]
