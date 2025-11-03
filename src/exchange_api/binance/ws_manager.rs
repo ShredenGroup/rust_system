@@ -2,7 +2,7 @@ use crate::common::config::ws_config::{
     MarkPriceConfig, KlineConfig, PartialDepthConfig, DiffDepthConfig, ConfigLoader, BookTickerConfig
 };
 use super::ws::BinanceWebSocket;
-use crate::dto::binance::websocket::{MarkPriceData, BinanceDepth, KlineData, BookTickerData};
+use crate::dto::binance::websocket::{MarkPriceData, BinancePartialDepth, KlineData, BookTickerData};
 use anyhow::Result;
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -26,8 +26,8 @@ pub enum WebSocketDataType {
 pub enum WebSocketMessage {
     MarkPrice(Arc<MarkPriceData>),
     Kline(Arc<KlineData>),
-    PartialDepth(Arc<BinanceDepth>),
-    DiffDepth(Arc<BinanceDepth>),
+    PartialDepth(Arc<BinancePartialDepth>),
+    DiffDepth(Arc<BinancePartialDepth>),
     BookTicker(Arc<BookTickerData>),
 }
 
@@ -344,7 +344,7 @@ impl WebSocketManager {
             // 为每个交易对创建连接
             for symbol in &symbols {
                 // 创建专门用于 BinanceDepth 的通道
-                let (depth_tx, mut depth_rx) = mpsc::unbounded_channel::<BinanceDepth>();
+                let (depth_tx, mut depth_rx) = mpsc::unbounded_channel::<BinancePartialDepth>();
                 
                 // 启动消息转发任务
                 let message_tx_clone = message_tx.clone();
@@ -405,7 +405,7 @@ impl WebSocketManager {
             // 为每个交易对创建连接
             for symbol in &symbols {
                 // 创建专门用于 BinanceDepth 的通道
-                let (depth_tx, mut depth_rx) = mpsc::unbounded_channel::<BinanceDepth>();
+                let (depth_tx, mut depth_rx) = mpsc::unbounded_channel::<BinancePartialDepth>();
                 
                 // 启动消息转发任务
                 let message_tx_clone = message_tx.clone();

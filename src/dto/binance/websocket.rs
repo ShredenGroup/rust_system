@@ -35,37 +35,31 @@ pub struct MarkPriceData {
     pub time: i64, // 时间戳
 }
 
-/// 深度更新数据 - 使用 serde_with 自动转换价格和数量
-/// 支持两种格式：
-/// 1. 增量更新流 (@depth@100ms): 包含 e, E, s, U, u 等字段
-/// 2. Partial Depth Stream (@depth20@100ms): 只包含 lastUpdateId, bids, asks
+/// 增量更新流深度数据 (@depth@100ms)
+/// 格式: {"e":"depthUpdate","E":...,"s":"XRPUSDT","U":...,"u":...,"b":[...],"a":[...]}
 #[serde_as]
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct BinanceDepth {
-    #[serde(rename = "e", default)]
-    pub event_type: Option<String>, // "depthUpdate" (增量更新流)
+pub struct BinanceDepthUpdate {
+    #[serde(rename = "e")]
+    pub event_type: String, // "depthUpdate"
 
-    #[serde(rename = "E", default)]
-    pub event_time: Option<i64>, // Event time (增量更新流)
+    #[serde(rename = "E")]
+    pub event_time: i64, // Event time
 
     #[serde(rename = "T", default)]
     pub transaction_time: Option<i64>, // Transaction time (可选)
 
-    #[serde(rename = "s", default)]
-    pub symbol: Option<TradingSymbol>, // Symbol (增量更新流)
+    #[serde(rename = "s")]
+    pub symbol: TradingSymbol, // Symbol
 
-    #[serde(rename = "U", default)]
-    pub first_update_id: Option<i64>, // First update ID in event (增量更新流)
+    #[serde(rename = "U")]
+    pub first_update_id: i64, // First update ID in event
 
-    #[serde(rename = "u", default)]
-    pub final_update_id: Option<i64>, // Final update ID in event (增量更新流)
+    #[serde(rename = "u")]
+    pub final_update_id: i64, // Final update ID in event
 
     #[serde(rename = "pu", default)]
     pub prev_final_update_id: Option<i64>, // Final update Id in last stream (可选)
-
-    // Partial Depth Stream 使用 lastUpdateId
-    #[serde(rename = "lastUpdateId", default)]
-    pub last_update_id: Option<i64>, // Last update ID (Partial Depth Stream)
 
     #[serde(rename = "b")]
     #[serde_as(as = "Vec<[DisplayFromStr; 2]>")]
@@ -76,33 +70,23 @@ pub struct BinanceDepth {
     pub asks: Vec<[f64; 2]>, // Asks to be updated [price, quantity] (auto-converted from strings)
 }
 
-impl BinanceDepth {
-    /// 获取最佳买价
-    pub fn best_bid(&self) -> Option<f64> {
-        self.bids.first().map(|bid| bid[0])
-    }
+/// Partial Depth Stream 深度数据 (@depth20@100ms)
+/// 格式: {"lastUpdateId":...,"bids":[...],"asks":[...]}
+#[serde_as]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct BinancePartialDepth {
+    #[serde(rename = "lastUpdateId")]
+    pub last_update_id: i64, // Last update ID
 
-    /// 获取最佳卖价
-    pub fn best_ask(&self) -> Option<f64> {
-        self.asks.first().map(|ask| ask[0])
-    }
+    #[serde(rename = "bids")]
+    #[serde_as(as = "Vec<[DisplayFromStr; 2]>")]
+    pub bids: Vec<[f64; 2]>, // Bids [price, quantity] (auto-converted from strings)
 
-    /// 获取买卖价差
-    pub fn spread(&self) -> Option<f64> {
-        match (self.best_bid(), self.best_ask()) {
-            (Some(bid), Some(ask)) => Some(ask - bid),
-            _ => None,
-        }
-    }
-
-    /// 获取中间价
-    pub fn mid_price(&self) -> Option<f64> {
-        match (self.best_bid(), self.best_ask()) {
-            (Some(bid), Some(ask)) => Some((bid + ask) / 2.0),
-            _ => None,
-        }
-    }
+    #[serde(rename = "asks")]
+    #[serde_as(as = "Vec<[DisplayFromStr; 2]>")]
+    pub asks: Vec<[f64; 2]>, // Asks [price, quantity] (auto-converted from strings)
 }
+
 
 /// K线数据包装器
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -614,24 +598,17 @@ mod tests {
             "a": [["2521.13", "37.315"], ["2521.14", "50.0"]]
         }"#;
 
-        let data: BinanceDepth = serde_json::from_str(json_str).unwrap();
-
-        assert_eq!(data.symbol.as_str(), "ETHUSDT");
-        assert_eq!(data.event_type, "depthUpdate");
-        assert_eq!(data.bids.len(), 2);
-        assert_eq!(data.asks.len(), 2);
+        let update: BinanceDepthUpdate = serde_json::from_str(json_str).unwrap();
+        assert_eq!(update.symbol.as_str(), "ETHUSDT");
+        assert_eq!(update.event_type, "depthUpdate");
+        assert_eq!(update.bids.len(), 2);
+        assert_eq!(update.asks.len(), 2);
 
         // 测试价格和数量的自动转换
-        assert_eq!(data.bids[0][0], 200.0); // 价格
-        assert_eq!(data.bids[0][1], 260.401); // 数量
-        assert_eq!(data.asks[0][0], 2521.13); // 价格
-        assert_eq!(data.asks[0][1], 37.315); // 数量
-
-        // 测试便利方法
-        assert_eq!(data.best_bid(), Some(200.0));
-        assert_eq!(data.best_ask(), Some(2521.13));
-        assert_eq!(data.spread(), Some(2321.13));
-        assert_eq!(data.mid_price(), Some(1360.565));
+        assert_eq!(update.bids[0][0], 200.0); // 价格
+        assert_eq!(update.bids[0][1], 260.401); // 数量
+        assert_eq!(update.asks[0][0], 2521.13); // 价格
+        assert_eq!(update.asks[0][1], 37.315); // 数量
     }
 
     #[test]

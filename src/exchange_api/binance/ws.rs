@@ -1,5 +1,5 @@
 use crate::common::consts::BINANCE_WS;
-use crate::dto::binance::websocket::{MarkPriceData, BinanceDepth, KlineData, BookTickerData, BinanceTradeData};
+use crate::dto::binance::websocket::{MarkPriceData, BinancePartialDepth, BinanceDepthUpdate, KlineData, BookTickerData, BinanceTradeData};
 use anyhow::Result;
 use futures::StreamExt;
 use serde_json;
@@ -96,7 +96,7 @@ impl BinanceWebSocket {
         &self,
         symbol: &str,
         interval: &str,
-        tx: mpsc::UnboundedSender<BinanceDepth>,
+        tx: mpsc::UnboundedSender<BinancePartialDepth>,
     ) -> Result<()> {
         let stream_name = if interval == "250ms" {
             format!("{}@depth", symbol)
@@ -119,20 +119,8 @@ impl BinanceWebSocket {
             match msg? {
                 Message::Text(text) => {
                     websocket_log!(debug, "Received Depth message, length: {}", text.len());
-                    match serde_json::from_str::<BinanceDepth>(&text) {
-                        Ok(data) => {
-                            if let Err(e) = tx.send(data) {
-                                websocket_log!(warn, "Failed to send depth message: {}", e);
-                                break;
-                            } else {
-                                websocket_log!(debug, "Depth message sent successfully");
-                            }
-                        }
-                        Err(e) => {
-                            websocket_log!(warn, "Failed to parse Depth message: {}", e);
-                            websocket_log!(debug, "Failed message content: {}", text);
-                        }
-                    }
+                    // subscribe_depth 暂时不使用，只支持 partial depth
+                    websocket_log!(warn, "subscribe_depth is deprecated, use subscribe_partial_depth instead");
                 }
                 Message::Close(_) => {
                     websocket_log!(info, "Depth WebSocket connection closed");
@@ -212,7 +200,7 @@ impl BinanceWebSocket {
         &self,
         symbols: &[String],
         interval: &str,
-        tx: mpsc::UnboundedSender<BinanceDepth>,
+        tx: mpsc::UnboundedSender<BinancePartialDepth>,
     ) -> Result<()> {
         let stream_names: Vec<String> = symbols
             .iter()
@@ -240,12 +228,8 @@ impl BinanceWebSocket {
         while let Some(msg) = read.next().await {
             match msg? {
                 Message::Text(text) => {
-                    if let Ok(data) = serde_json::from_str::<BinanceDepth>(&text) {
-                        if let Err(e) = tx.send(data) {
-                            websocket_log!(warn, "Failed to send depth message: {}", e);
-                            break;
-                        }
-                    }
+                    // subscribe_multiple_depths 暂时不使用，只支持 partial depth
+                    websocket_log!(warn, "subscribe_multiple_depths is deprecated, use subscribe_multiple_partial_depths instead");
                 }
                 Message::Close(_) => {
                     websocket_log!(info, "Multiple depth streams connection closed");
@@ -276,7 +260,7 @@ impl BinanceWebSocket {
         symbol: &str,
         levels: u8,
         interval: Option<&str>,
-        tx: mpsc::UnboundedSender<BinanceDepth>,
+        tx: mpsc::UnboundedSender<BinancePartialDepth>,
     ) -> Result<()> {
         // 验证 levels 参数
         if !matches!(levels, 5 | 10 | 20) {
@@ -307,13 +291,20 @@ impl BinanceWebSocket {
         while let Some(msg) = read.next().await {
             match msg? {
                 Message::Text(text) => {
-                    if let Ok(data) = serde_json::from_str::<BinanceDepth>(&text) {
-                        if let Err(e) = tx.send(data) {
-                            websocket_log!(warn, "Failed to send partial depth message: {}", e);
-                            break;
+                    websocket_log!(debug, "Received Partial Depth message, length: {}", text.len());
+                    match serde_json::from_str::<BinancePartialDepth>(&text) {
+                        Ok(data) => {
+                            if let Err(e) = tx.send(data) {
+                                websocket_log!(warn, "Failed to send partial depth message: {}", e);
+                                break;
+                            } else {
+                                websocket_log!(debug, "Partial Depth message sent successfully");
+                            }
                         }
-                    } else {
-                        websocket_log!(warn, "Failed to parse partial depth message: {}", text);
+                        Err(e) => {
+                            websocket_log!(warn, "Failed to parse Partial Depth message: {}", e);
+                            websocket_log!(debug, "Failed message content: {}", text);
+                        }
                     }
                 }
                 Message::Close(_) => {
@@ -345,7 +336,7 @@ impl BinanceWebSocket {
         symbols: &[String],
         levels: u8,
         interval: Option<&str>,
-        tx: mpsc::UnboundedSender<BinanceDepth>,
+        tx: mpsc::UnboundedSender<BinancePartialDepth>,
     ) -> Result<()> {
         // 验证 levels 参数
         if !matches!(levels, 5 | 10 | 20) {
@@ -382,13 +373,17 @@ impl BinanceWebSocket {
         while let Some(msg) = read.next().await {
             match msg? {
                 Message::Text(text) => {
-                    if let Ok(data) = serde_json::from_str::<BinanceDepth>(&text) {
-                        if let Err(e) = tx.send(data) {
-                            websocket_log!(warn, "Failed to send partial depth message: {}", e);
-                            break;
+                    match serde_json::from_str::<BinancePartialDepth>(&text) {
+                        Ok(data) => {
+                            if let Err(e) = tx.send(data) {
+                                websocket_log!(warn, "Failed to send partial depth message: {}", e);
+                                break;
+                            }
                         }
-                    } else {
-                        websocket_log!(warn, "Failed to parse partial depth message: {}", text);
+                        Err(e) => {
+                            websocket_log!(warn, "Failed to parse partial depth message: {}", e);
+                            websocket_log!(debug, "Failed message content: {}", text);
+                        }
                     }
                 }
                 Message::Close(_) => {
@@ -840,7 +835,7 @@ impl BinanceWebSocket {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::dto::binance::websocket::BinanceDepth;
+    use crate::dto::binance::websocket::{BinancePartialDepth, BinanceDepthUpdate};
     use tokio::sync::mpsc;
 
     #[tokio::test]
@@ -913,18 +908,17 @@ mod tests {
             "a": [["2521.13", "37.315"]]
         }"#;
 
-        let data: BinanceDepth = serde_json::from_str(json_str).unwrap();
-
-        assert_eq!(data.symbol.as_str(), "ETHUSDT");
-        assert_eq!(data.event_type, "depthUpdate");
-        assert_eq!(data.bids.len(), 1);
-        assert_eq!(data.asks.len(), 1);
+        let update: BinanceDepthUpdate = serde_json::from_str(json_str).unwrap();
+        assert_eq!(update.symbol.as_str(), "ETHUSDT");
+        assert_eq!(update.event_type, "depthUpdate");
+        assert_eq!(update.bids.len(), 1);
+        assert_eq!(update.asks.len(), 1);
         
         // 测试自动转换后的数值类型
-        assert_eq!(data.bids[0][0], 200.0);
-        assert_eq!(data.bids[0][1], 260.401);
-        assert_eq!(data.asks[0][0], 2521.13);
-        assert_eq!(data.asks[0][1], 37.315);
+        assert_eq!(update.bids[0][0], 200.0);
+        assert_eq!(update.bids[0][1], 260.401);
+        assert_eq!(update.asks[0][0], 2521.13);
+        assert_eq!(update.asks[0][1], 37.315);
     }
 
     #[tokio::test]
@@ -943,11 +937,7 @@ mod tests {
         let max_messages = 3;
 
         while let Some(data) = rx.recv().await {
-            if let Some(symbol) = &data.symbol {
-                websocket_log!(info, "收到深度数据: {}", symbol);
-            } else {
-                websocket_log!(info, "收到深度数据: (无symbol)");
-            }
+            websocket_log!(info, "收到深度数据: bids={}, asks={}", data.bids.len(), data.asks.len());
             message_count += 1;
 
             if message_count >= max_messages {

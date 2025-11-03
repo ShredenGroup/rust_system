@@ -1,5 +1,5 @@
 pub use crate::dto::mexc::PushDataV3ApiWrapper;
-pub use crate::dto::binance::websocket::{BinanceDepth, BookTickerData,BinanceTradeData};
+pub use crate::dto::binance::websocket::{BinancePartialDepth, BookTickerData,BinanceTradeData};
 pub use crate::models::{CommonDepth, OrderTick, OrderTickBuffer, TradeTick, TradeTickBuffer};
 pub use tokio::sync::mpsc;
 
@@ -12,7 +12,7 @@ pub struct SnapShot {
 
 pub struct SnapshotCreator {
     pub rec_mexc_order_tick: mpsc::Receiver<PushDataV3ApiWrapper>,
-    pub rec_binance_depth: mpsc::Receiver<BinanceDepth>,
+    pub rec_binance_depth: mpsc::Receiver<BinancePartialDepth>,
     pub rec_order_tick: mpsc::Receiver<BookTickerData>,
     pub rec_trade_tick: mpsc::Receiver<BinanceTradeData>,
     pub sender_snapshot: mpsc::Sender<SnapShot>,
@@ -20,7 +20,7 @@ pub struct SnapshotCreator {
 
 impl SnapshotCreator {
     pub fn new(rec_mexc_order_tick: mpsc::Receiver<PushDataV3ApiWrapper>,
-    rec_binance_depth: mpsc::Receiver<BinanceDepth>,
+    rec_binance_depth: mpsc::Receiver<BinancePartialDepth>,
     rec_order_tick: mpsc::Receiver<BookTickerData>,
     rec_trade_tick: mpsc::Receiver<BinanceTradeData>,
     sender_snapshot: mpsc::Sender<SnapShot>) -> Self {

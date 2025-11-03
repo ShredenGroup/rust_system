@@ -1,5 +1,5 @@
 use crate::common::utils::f2u;
-use crate::dto::binance::websocket::BinanceDepth;
+use crate::dto::binance::websocket::BinancePartialDepth;
 use crate::dto::mexc::PushDataV3ApiWrapper;
 use crate::models::{Exchange, TradingSymbol};
 use std::collections::BTreeMap;
@@ -51,7 +51,7 @@ impl CommonDepth {
         }
     }
 
-    pub fn new_from_binance(data: BinanceDepth) -> Self {
+    pub fn new_from_binance(data: BinancePartialDepth) -> Self {
         // 辅助函数：将 Binance 深度数据转换为 BTreeMap
         let depth_to_map = |items: &[[f64; 2]]| {
             items
@@ -72,13 +72,11 @@ impl CommonDepth {
         CommonDepth {
             bid_list: depth_to_map(&data.bids),
             ask_list: depth_to_map(&data.asks),
-            symbol: data.symbol.unwrap_or(TradingSymbol::BTCUSDT),
-            timestamp: data.transaction_time
-                .or(data.event_time)
-                .unwrap_or_else(|| std::time::SystemTime::now()
-                    .duration_since(std::time::UNIX_EPOCH)
-                    .unwrap()
-                    .as_millis() as i64),
+            symbol: TradingSymbol::BTCUSDT, // Partial Depth 没有 symbol，使用默认值
+            timestamp: std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_millis() as i64,
             exchange: Exchange::Binance,
         }
     }
