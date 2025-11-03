@@ -943,7 +943,11 @@ mod tests {
         let max_messages = 3;
 
         while let Some(data) = rx.recv().await {
-            websocket_log!(info, "收到深度数据: {}", data.symbol);
+            if let Some(symbol) = &data.symbol {
+                websocket_log!(info, "收到深度数据: {}", symbol);
+            } else {
+                websocket_log!(info, "收到深度数据: (无symbol)");
+            }
             message_count += 1;
 
             if message_count >= max_messages {

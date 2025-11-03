@@ -36,29 +36,36 @@ pub struct MarkPriceData {
 }
 
 /// 深度更新数据 - 使用 serde_with 自动转换价格和数量
+/// 支持两种格式：
+/// 1. 增量更新流 (@depth@100ms): 包含 e, E, s, U, u 等字段
+/// 2. Partial Depth Stream (@depth20@100ms): 只包含 lastUpdateId, bids, asks
 #[serde_as]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct BinanceDepth {
-    #[serde(rename = "e")]
-    pub event_type: String, // "depthUpdate"
+    #[serde(rename = "e", default)]
+    pub event_type: Option<String>, // "depthUpdate" (增量更新流)
 
-    #[serde(rename = "E")]
-    pub event_time: i64, // Event time
+    #[serde(rename = "E", default)]
+    pub event_time: Option<i64>, // Event time (增量更新流)
 
     #[serde(rename = "T", default)]
-    pub transaction_time: Option<i64>, // Transaction time (可选，某些流可能没有)
+    pub transaction_time: Option<i64>, // Transaction time (可选)
 
-    #[serde(rename = "s")]
-    pub symbol: TradingSymbol, // Symbol
+    #[serde(rename = "s", default)]
+    pub symbol: Option<TradingSymbol>, // Symbol (增量更新流)
 
-    #[serde(rename = "U")]
-    pub first_update_id: i64, // First update ID in event
+    #[serde(rename = "U", default)]
+    pub first_update_id: Option<i64>, // First update ID in event (增量更新流)
 
-    #[serde(rename = "u")]
-    pub final_update_id: i64, // Final update ID in event
+    #[serde(rename = "u", default)]
+    pub final_update_id: Option<i64>, // Final update ID in event (增量更新流)
 
     #[serde(rename = "pu", default)]
     pub prev_final_update_id: Option<i64>, // Final update Id in last stream (可选)
+
+    // Partial Depth Stream 使用 lastUpdateId
+    #[serde(rename = "lastUpdateId", default)]
+    pub last_update_id: Option<i64>, // Last update ID (Partial Depth Stream)
 
     #[serde(rename = "b")]
     #[serde_as(as = "Vec<[DisplayFromStr; 2]>")]

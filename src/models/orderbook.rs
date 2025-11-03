@@ -72,8 +72,13 @@ impl CommonDepth {
         CommonDepth {
             bid_list: depth_to_map(&data.bids),
             ask_list: depth_to_map(&data.asks),
-            symbol: data.symbol,
-            timestamp: data.transaction_time.unwrap_or(data.event_time),
+            symbol: data.symbol.unwrap_or(TradingSymbol::BTCUSDT),
+            timestamp: data.transaction_time
+                .or(data.event_time)
+                .unwrap_or_else(|| std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .unwrap()
+                    .as_millis() as i64),
             exchange: Exchange::Binance,
         }
     }
