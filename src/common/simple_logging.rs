@@ -177,38 +177,39 @@ impl SimpleLoggingManager {
 }
 
 /// 便捷的日志宏，用于不同日志类型
+/// 这些宏可以在表达式位置使用，返回 () 类型
 #[macro_export]
 macro_rules! signal_log {
     ($level:ident, $($arg:tt)*) => {
-        tracing::$level!(target: "signals", $($arg)*);
+        { tracing::$level!(target: "signals", $($arg)*); () }
     };
 }
 
 #[macro_export]
 macro_rules! order_log {
     ($level:ident, $($arg:tt)*) => {
-        tracing::$level!(target: "orders", $($arg)*);
+        { tracing::$level!(target: "orders", $($arg)*); () }
     };
 }
 
 #[macro_export]
 macro_rules! websocket_log {
     ($level:ident, $($arg:tt)*) => {
-        tracing::$level!(target: "websocket", $($arg)*);
+        { tracing::$level!(target: "websocket", $($arg)*); () }
     };
 }
 
 #[macro_export]
 macro_rules! strategy_log {
     ($level:ident, $($arg:tt)*) => {
-        tracing::$level!(target: "strategy", $($arg)*);
+        { tracing::$level!(target: "strategy", $($arg)*); () }
     };
 }
 
 #[macro_export]
 macro_rules! error_log {
     ($level:ident, $($arg:tt)*) => {
-        tracing::$level!(target: "errors", $($arg)*);
+        { tracing::$level!(target: "errors", $($arg)*); () }
     };
 }
 
