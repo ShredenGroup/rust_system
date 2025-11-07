@@ -56,6 +56,8 @@ impl Q1Factory {
             TradingSymbol::ONDOUSDT,  // ONDO
             TradingSymbol::TAOUSDT,   // TAO
             TradingSymbol::ASTERUSDT, // ASTER
+            TradingSymbol::GIGGLEUSDT, // GIGGLE
+            TradingSymbol::AIAUSDT,   // AIA
         ];
         
         info!("📊 交易币种: {} 个", trading_symbols.len());
@@ -146,6 +148,20 @@ impl Q1Factory {
                     11,     // 止盈周期（11小时）
                     20,     // ATR周期（20小时）
                     2.8,    // ATR倍数
+                ),
+                TradingSymbol::GIGGLEUSDT => (
+                    35,     // 突破周期（35小时）
+                    240,    // EMA周期（240小时）
+                    10,     // 止盈周期（10小时）
+                    20,     // ATR周期（20小时）
+                    3.0,    // ATR倍数
+                ),
+                TradingSymbol::AIAUSDT => (
+                    35,     // 突破周期（35小时）
+                    240,    // EMA周期（240小时）
+                    10,     // 止盈周期（10小时）
+                    20,     // ATR周期（20小时）
+                    3.0,    // ATR倍数
                 ),
                 _ => (
                     35,     // 默认突破周期保持不变（35小时）
