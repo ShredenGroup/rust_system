@@ -11,6 +11,5 @@ pub struct ZYStrategy {
     pub close_std_z_score: ZScore,
     pub high_max: Maximum,
     pub low_min: Minimum,
-    pub std_thredshold:f64,
-    pub 
+    pub std_thredshold:f64
 }
