@@ -72,6 +72,7 @@ tracing-appender = "0.2.3"
 prost = "0.12"
 dashmap = "5.5"
 
+trusty = { git = "https://github.com/letsql/trusty" }
 [build-dependencies]
 tonic-build = "0.10"
 

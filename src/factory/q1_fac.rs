@@ -52,12 +52,8 @@ impl Q1Factory {
         let trading_symbols = vec![
             TradingSymbol::BNBUSDT,   // 币安币
             TradingSymbol::ETHUSDT,   // 以太坊
-            TradingSymbol::NEIROUSDT,
-            TradingSymbol::ONDOUSDT,  // ONDO
             TradingSymbol::TAOUSDT,   // TAO
-            TradingSymbol::ASTERUSDT, // ASTER
-            TradingSymbol::GIGGLEUSDT, // GIGGLE
-            TradingSymbol::AIAUSDT,   // AIA
+            TradingSymbol::ONDOUSDT,  // ONDO
         ];
         
         info!("📊 交易币种: {} 个", trading_symbols.len());
