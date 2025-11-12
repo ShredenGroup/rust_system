@@ -5,6 +5,13 @@ use ta::{Close, High, Open};
 use trusty::GradientBoostedDecisionTrees;
 pub struct MLV1Strategy {
     pub cxt: StrategyContext,
-    pub position: StrategyPosition,
-    pub gbt: GradientBoostedDecisionTrees,
+    pub model: GradientBoostedDecisionTrees,
+}
+impl MLV1Strategy{
+    pub fn new(cxt:StrategyContext,model:GradientBoostedDecisionTrees) -> Self{
+        Self{
+            cxt,
+            model,
+        }
+    }
 }

@@ -1,3 +1,4 @@
+pub mod hft_position;
 pub mod key;
 pub mod order;
 pub mod order_tick;
@@ -13,6 +14,9 @@ pub use key::CommonKey;
 pub use order::Order;
 pub use order_tick::{OrderTick, OrderTickBuffer};
 pub use orderbook::CommonDepth;
+pub use hft_position::{
+    HftPositionKey, HftPositionManager, LockFreePosition, PositionSnapshot,
+};
 pub use position::{
     OrderStatus, PendingOrder, Position, PositionKey, PositionManager, StrategyPosition,
 };
