@@ -7,10 +7,10 @@ use std::num::ParseFloatError;
 /// 订单tick的基础数据
 #[derive(Debug, Clone, Copy)]
 pub struct OrderTickData {
-    pub best_bid_price: u64,
-    pub best_ask_price: u64,
-    pub best_bid_quantity: u64,
-    pub best_ask_quantity: u64,
+    pub best_bid_price: f64,
+    pub best_ask_price: f64,
+    pub best_bid_quantity: f64,
+    pub best_ask_quantity: f64,
 }
 
 /// 最佳买卖价订单数据结构
@@ -25,10 +25,10 @@ pub struct OrderTick {
 impl OrderTick {
     pub fn new_from_mexc(data: PushDataV3ApiWrapper) -> Result<Self, ParseFloatError> {
         if let Some(order_tick) = data.extract_book_ticker_data() {
-            let best_bid_price = crate::common::utils::s2u(&order_tick.bid_price)?;
-            let best_ask_price = crate::common::utils::s2u(&order_tick.ask_price)?;
-            let best_bid_quantity = crate::common::utils::s2u(&order_tick.bid_quantity)?;
-            let best_ask_quantity = crate::common::utils::s2u(&order_tick.ask_quantity)?;
+            let best_bid_price = order_tick.bid_price.parse::<f64>()?;
+            let best_ask_price = order_tick.ask_price.parse::<f64>()?;
+            let best_bid_quantity = order_tick.bid_quantity.parse::<f64>()?;
+            let best_ask_quantity = order_tick.ask_quantity.parse::<f64>()?;
             
             Ok(Self {
                 data: OrderTickData {
@@ -49,10 +49,10 @@ impl OrderTick {
     pub fn new_from_binance(data: BookTickerData) -> Self {
         Self {
             data: OrderTickData {
-                best_bid_price: crate::common::utils::f2u(data.best_bid_price),
-                best_ask_price: crate::common::utils::f2u(data.best_ask_price),
-                best_bid_quantity: crate::common::utils::f2u(data.best_bid_qty),
-                best_ask_quantity: crate::common::utils::f2u(data.best_ask_qty),
+                best_bid_price: data.best_bid_price,
+                best_ask_price: data.best_ask_price,
+                best_bid_quantity: data.best_bid_qty,
+                best_ask_quantity: data.best_ask_qty,
             },
             exchange: Exchange::Binance,
             symbol: data.symbol,
@@ -61,22 +61,22 @@ impl OrderTick {
     }
 
     /// 计算买卖价差
-    pub fn spread(&self) -> u64 {
+    pub fn spread(&self) -> f64 {
         if self.data.best_ask_price > self.data.best_bid_price {
             self.data.best_ask_price - self.data.best_bid_price
         } else {
-            0
+            0.0
         }
     }
 
     /// 计算中间价
-    pub fn mid_price(&self) -> u64 {
-        (self.data.best_bid_price + self.data.best_ask_price) / 2
+    pub fn mid_price(&self) -> f64 {
+        (self.data.best_bid_price + self.data.best_ask_price) / 2.0
     }
 
     /// 检查是否有有效的买卖价
     pub fn is_valid(&self) -> bool {
-        self.data.best_bid_price > 0 && self.data.best_ask_price > 0
+        self.data.best_bid_price > 0.0 && self.data.best_ask_price > 0.0
     }
 }
 
@@ -158,8 +158,8 @@ impl OrderTickBuffer {
             return 0.0;
         }
 
-        let total_spread: u64 = self.ticks.iter().map(|tick| tick.spread()).sum();
-        total_spread as f64 / self.ticks.len() as f64
+        let total_spread: f64 = self.ticks.iter().map(|tick| tick.spread()).sum();
+        total_spread / self.ticks.len() as f64
     }
 
     /// 计算平均中间价
@@ -168,8 +168,8 @@ impl OrderTickBuffer {
             return 0.0;
         }
 
-        let total_mid_price: u64 = self.ticks.iter().map(|tick| tick.mid_price()).sum();
-        total_mid_price as f64 / self.ticks.len() as f64
+        let total_mid_price: f64 = self.ticks.iter().map(|tick| tick.mid_price()).sum();
+        total_mid_price / self.ticks.len() as f64
     }
 }
 
@@ -186,10 +186,10 @@ mod tests {
         // 添加 OrderTick
         let tick1 = OrderTick {
             data: OrderTickData {
-                best_bid_price: 50000,
-                best_ask_price: 50010,
-                best_bid_quantity: 100,
-                best_ask_quantity: 200,
+                best_bid_price: 50000.0,
+                best_ask_price: 50010.0,
+                best_bid_quantity: 100.0,
+                best_ask_quantity: 200.0,
             },
             exchange: Exchange::Binance,
             symbol: TradingSymbol::BTCUSDT,
@@ -202,29 +202,29 @@ mod tests {
         // 测试获取最新 tick
         let latest = buffer.get_latest_tick();
         assert!(latest.is_some());
-        assert_eq!(latest.unwrap().data.best_bid_price, 50000);
+        assert_eq!(latest.unwrap().data.best_bid_price, 50000.0);
 
         // 测试价差计算
-        assert_eq!(latest.unwrap().spread(), 10);
-        assert_eq!(latest.unwrap().mid_price(), 25005);
+        assert_eq!(latest.unwrap().spread(), 10.0);
+        assert_eq!(latest.unwrap().mid_price(), 25005.0);
     }
 
     #[test]
     fn test_order_tick_calculations() {
         let tick = OrderTick {
             data: OrderTickData {
-                best_bid_price: 50000,
-                best_ask_price: 50010,
-                best_bid_quantity: 100,
-                best_ask_quantity: 200,
+                best_bid_price: 50000.0,
+                best_ask_price: 50010.0,
+                best_bid_quantity: 100.0,
+                best_ask_quantity: 200.0,
             },
             exchange: Exchange::Binance,
             symbol: TradingSymbol::BTCUSDT,
             timestamp: 1000,
         };
 
-        assert_eq!(tick.spread(), 10);
-        assert_eq!(tick.mid_price(), 25005);
+        assert_eq!(tick.spread(), 10.0);
+        assert_eq!(tick.mid_price(), 25005.0);
         assert!(tick.is_valid());
     }
 }

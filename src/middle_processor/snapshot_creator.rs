@@ -120,10 +120,10 @@ impl SnapshotCreator {
                                 println!("⚠️ 没有最新的 MEXC OrderTick，使用默认值");
                                 OrderTick {
                                     data: crate::models::order_tick::OrderTickData {
-                                        best_bid_price: 0,
-                                        best_ask_price: 0,
-                                        best_bid_quantity: 0,
-                                        best_ask_quantity: 0,
+                                        best_bid_price: 0.0,
+                                        best_ask_price: 0.0,
+                                        best_bid_quantity: 0.0,
+                                        best_ask_quantity: 0.0,
                                     },
                                     exchange: crate::models::Exchange::Mexc,
                                     symbol: crate::models::TradingSymbol::BTCUSDT,

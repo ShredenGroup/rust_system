@@ -1,11 +1,11 @@
-use crate::common::utils::f2u;
 use crate::dto::binance::websocket::BinancePartialDepth;
 use crate::dto::mexc::PushDataV3ApiWrapper;
 use crate::models::{Exchange, TradingSymbol};
 use std::collections::BTreeMap;
-type Price = u64;
-type Quantity = u64;
-use ta::Orderbook;
+use ordered_float::OrderedFloat;
+
+type Price = OrderedFloat<f64>;
+type Quantity = f64;
 #[derive(Debug, Clone)]
 pub struct CommonDepth {
     pub bid_list: BTreeMap<Price, Quantity>,
@@ -28,7 +28,7 @@ impl CommonDepth {
                             item.quantity
                                 .parse::<f64>()
                                 .ok()
-                                .map(|quantity| (f2u(price), f2u(quantity)))
+                                .map(|quantity| (OrderedFloat(price), quantity))
                         })
                     })
                     .collect::<BTreeMap<Price, Quantity>>()
@@ -61,7 +61,7 @@ impl CommonDepth {
                     let quantity = item[1];
                     // 过滤掉价格为0或数量为0的无效数据
                     if price > 0.0 && quantity > 0.0 {
-                        Some((f2u(price), f2u(quantity)))
+                        Some((OrderedFloat(price), quantity))
                     } else {
                         None
                     }
@@ -81,11 +81,6 @@ impl CommonDepth {
         }
     }
 }
-impl Orderbook for CommonDepth {
-    fn get_bids_btm(&self) -> &BTreeMap<Price, Quantity> {
-        &self.bid_list
-    }
-    fn get_asks_btm(&self) -> &BTreeMap<Price, Quantity> {
-        &self.ask_list
-    }
-}
+// 注意：由于我们使用 f64 作为价格类型，不再实现 ta::Orderbook trait
+// 该 trait 期望 BTreeMap<u64, u64>，但我们使用 OrderedFloat<f64> 作为 key
+// 如果需要使用 ta 库的功能，可以通过访问 bid_list 和 ask_list 字段来获取数据

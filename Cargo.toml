@@ -68,6 +68,7 @@ rayon = "1.8"
 ta = {path="../ta-rs"}
 serde_with = "3.14.0"
 tracing-appender = "0.2.3"
+ordered-float = "4.2"
 
 prost = "0.12"
 dashmap = "5.5"

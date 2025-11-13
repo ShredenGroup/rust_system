@@ -9,6 +9,7 @@ pub mod signal;
 pub mod strategy;
 pub mod symbol;
 pub mod trade_tick;
+pub mod enums;
 pub use crate::common::enums::Exchange;
 pub use key::CommonKey;
 pub use order::Order;

@@ -1,14 +1,13 @@
 use crate::dto::binance::websocket::BinanceTradeData;
 use crate::models::{Exchange, Side, TradingSymbol};
-use crate::common::utils::f2u;
 
 /// 逐笔交易数据结构
 #[derive(Debug, Clone, Copy)]
 pub struct TradeTick {
     pub trade_id: u64,
     pub symbol: TradingSymbol,
-    pub price: u64,
-    pub quantity: u64,
+    pub price: f64,
+    pub quantity: f64,
     pub side: Side,
     pub timestamp: u64,
     pub exchange: Exchange,
@@ -101,8 +100,8 @@ impl TradeTick {
         Self {
             trade_id: data.trade_id,
             symbol: data.symbol,
-            price: f2u(data.price),
-            quantity: f2u(data.quantity),
+            price: data.price,
+            quantity: data.quantity,
             side: if data.is_buy() { Side::Buy } else { Side::Sell },
             timestamp: data.trade_time as u64,
             exchange: Exchange::Binance,
@@ -110,7 +109,7 @@ impl TradeTick {
     }
 
     /// 计算交易金额
-    pub fn amount(&self) -> u64 {
+    pub fn amount(&self) -> f64 {
         self.price * self.quantity
     }
 
