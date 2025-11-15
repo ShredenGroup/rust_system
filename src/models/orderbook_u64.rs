@@ -1,14 +1,15 @@
+use crate::common::utils::f2u;
 use crate::dto::binance::websocket::BinancePartialDepth;
 use crate::dto::mexc::PushDataV3ApiWrapper;
 use crate::models::{Exchange, TradingSymbol};
 use std::collections::BTreeMap;
-use ordered_float::OrderedFloat;
-use ta::Orderbookf64;
+use ta::{ OrderbookU64};
 
-type Price = OrderedFloat<f64>;
-type Quantity = f64;
+type Price = u64;
+type Quantity = u64;
+
 #[derive(Debug, Clone)]
-pub struct CommonDepth {
+pub struct CommonDepthU64 {
     pub bid_list: BTreeMap<Price, Quantity>,
     pub ask_list: BTreeMap<Price, Quantity>,
     pub symbol: TradingSymbol,
@@ -16,8 +17,7 @@ pub struct CommonDepth {
     pub exchange: Exchange,
 }
 
-// 可以在这里添加其他 MEXC 相关的结构体
-impl CommonDepth {
+impl CommonDepthU64 {
     pub fn new_from_mexc(data: PushDataV3ApiWrapper) -> Option<Self> {
         if let Some(partial_depth) = data.extract_limit_depth_data() {
             // 辅助函数：将深度数据转换为 BTreeMap
@@ -29,13 +29,13 @@ impl CommonDepth {
                             item.quantity
                                 .parse::<f64>()
                                 .ok()
-                                .map(|quantity| (OrderedFloat(price), quantity))
+                                .map(|quantity| (f2u(price), f2u(quantity)))
                         })
                     })
                     .collect::<BTreeMap<Price, Quantity>>()
             };
 
-            Some(CommonDepth {
+            Some(CommonDepthU64 {
                 bid_list: depth_to_map(&partial_depth.bids),
                 ask_list: depth_to_map(&partial_depth.asks),
                 symbol: data
@@ -62,7 +62,7 @@ impl CommonDepth {
                     let quantity = item[1];
                     // 过滤掉价格为0或数量为0的无效数据
                     if price > 0.0 && quantity > 0.0 {
-                        Some((OrderedFloat(price), quantity))
+                        Some((f2u(price), f2u(quantity)))
                     } else {
                         None
                     }
@@ -70,7 +70,7 @@ impl CommonDepth {
                 .collect::<BTreeMap<Price, Quantity>>()
         };
 
-        CommonDepth {
+        CommonDepthU64 {
             bid_list: depth_to_map(&data.bids),
             ask_list: depth_to_map(&data.asks),
             symbol: TradingSymbol::BTCUSDT, // Partial Depth 没有 symbol，使用默认值
@@ -82,8 +82,8 @@ impl CommonDepth {
         }
     }
 }
-// 实现 Orderbookf64 trait 以支持 ta 库的功能
-impl Orderbookf64 for CommonDepth {
+
+impl OrderbookU64 for CommonDepthU64 {
     fn get_bids_btm(&self) -> &BTreeMap<Price, Quantity> {
         &self.bid_list
     }
@@ -91,3 +91,4 @@ impl Orderbookf64 for CommonDepth {
         &self.ask_list
     }
 }
+

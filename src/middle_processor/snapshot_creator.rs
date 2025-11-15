@@ -2,7 +2,7 @@ pub use crate::dto::mexc::PushDataV3ApiWrapper;
 pub use crate::dto::binance::websocket::{BinancePartialDepth, BookTickerData,BinanceTradeData};
 pub use crate::models::{CommonDepth, OrderTick, OrderTickBuffer, TradeTick, TradeTickBuffer};
 pub use tokio::sync::mpsc;
-
+pub use ta::{TradeTickerf64,OrderTickerf64,BatchTradeTickerf64,BatchOrderTickerf64,Orderbookf64};
 pub struct SnapShot {
     pub binance_depth: CommonDepth,
     pub mexc_order_tick: OrderTick,
@@ -171,5 +171,13 @@ impl SnapshotCreator {
 
         println!("🛑 SnapshotCreator 主循环结束");
         Ok(())
+    }
+}
+impl Orderbookf64 for SnapShot{
+    fn get_bids_btm(&self) -> &std::collections::BTreeMap<ordered_float::OrderedFloat<f64>, f64> {
+        &self.binance_depth.bid_list
+    }
+    fn get_asks_btm(&self) -> &std::collections::BTreeMap<ordered_float::OrderedFloat<f64>, f64> {
+        &self.binance_depth.ask_list
     }
 }
