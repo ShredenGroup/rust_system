@@ -11,6 +11,7 @@ pub struct TradeTick {
     pub side: Side,
     pub timestamp: u64,
     pub exchange: Exchange,
+    pub is_mm_buyer: bool, // 买方是否是做市商
 }
 
 impl TradeTickerf64 for TradeTick {
@@ -19,6 +20,9 @@ impl TradeTickerf64 for TradeTick {
     }
     fn get_trade_quantity(&self) -> f64 {
         self.quantity
+    }
+    fn is_mm_buyer(&self) -> bool {
+        self.is_mm_buyer
     }
 }
 impl Timestamp for TradeTick {
@@ -122,6 +126,7 @@ impl TradeTick {
             side: if data.is_buy() { Side::Buy } else { Side::Sell },
             timestamp: data.trade_time as u64,
             exchange: Exchange::Binance,
+            is_mm_buyer: data.is_buyer_maker, // 买方是否是做市商
         }
     }
 
@@ -160,6 +165,7 @@ mod tests {
             side: Side::Buy,
             timestamp: 1000,
             exchange: Exchange::Binance,
+            is_mm_buyer: false,
         };
 
         buffer.push_trade(trade1);

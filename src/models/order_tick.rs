@@ -3,7 +3,7 @@ use crate::dto::binance::websocket::BookTickerData;
 use crate::models::{TradingSymbol, Exchange};
 use crate::common::ts::TransactionTime;
 use std::num::ParseFloatError;
-
+use ta::{OrderTickerf64,BatchOrderTickerf64,Timestamp};
 /// 订单tick的基础数据
 #[derive(Debug, Clone, Copy)]
 pub struct OrderTickData {
@@ -20,6 +20,25 @@ pub struct OrderTick {
     pub exchange: Exchange,
     pub symbol: TradingSymbol,
     pub timestamp: u64,
+}
+impl Timestamp for OrderTick {
+    fn timestamp(&self) -> u64 {
+        self.timestamp
+    }
+}
+impl OrderTickerf64 for OrderTick {
+    fn get_best_bid_price(&self) -> f64 {
+        self.data.best_bid_price
+    }
+    fn get_best_ask_price(&self) -> f64 {
+        self.data.best_ask_price
+    }
+    fn get_best_bid_quantity(&self) -> f64 {
+        self.data.best_bid_quantity
+    }
+    fn get_best_ask_quantity(&self) -> f64 {
+        self.data.best_ask_quantity
+    }
 }
 
 impl OrderTick {
@@ -172,7 +191,11 @@ impl OrderTickBuffer {
         total_mid_price / self.ticks.len() as f64
     }
 }
-
+impl BatchOrderTickerf64<OrderTick> for OrderTickBuffer {
+    fn get_batch_order_ticker(&self) -> Option<&[OrderTick]> {
+        Some(&self.ticks)
+    }
+}
 #[cfg(test)]
 mod tests {
     use super::*;

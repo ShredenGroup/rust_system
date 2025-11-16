@@ -173,11 +173,13 @@ impl SnapshotCreator {
         Ok(())
     }
 }
-impl Orderbookf64 for SnapShot{
-    fn get_bids_btm(&self) -> &std::collections::BTreeMap<ordered_float::OrderedFloat<f64>, f64> {
-        &self.binance_depth.bid_list
+impl BatchOrderTickerf64<OrderTick> for SnapShot{
+    fn get_batch_order_ticker(&self) -> Option<&[OrderTick]> {
+        self.order_tick.get_batch_order_ticker()
     }
-    fn get_asks_btm(&self) -> &std::collections::BTreeMap<ordered_float::OrderedFloat<f64>, f64> {
-        &self.binance_depth.ask_list
+}
+impl BatchTradeTickerf64<TradeTick> for SnapShot{
+    fn get_batch_trade_ticker(&self) -> Option<&[TradeTick]> {
+        self.trade_tick.get_batch_trade_ticker()
     }
 }
