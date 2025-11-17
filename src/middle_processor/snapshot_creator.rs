@@ -3,6 +3,8 @@ pub use crate::dto::binance::websocket::{BinancePartialDepth, BookTickerData,Bin
 pub use crate::models::{CommonDepth, OrderTick, OrderTickBuffer, TradeTick, TradeTickBuffer};
 pub use tokio::sync::mpsc;
 pub use ta::{TradeTickerf64,OrderTickerf64,BatchTradeTickerf64,BatchOrderTickerf64,Orderbookf64};
+use std::collections::BTreeMap;
+use ordered_float::OrderedFloat;
 pub struct SnapShot {
     pub binance_depth: CommonDepth,
     pub mexc_order_tick: OrderTick,
@@ -184,10 +186,10 @@ impl BatchTradeTickerf64<TradeTick> for SnapShot{
     }
 }
 impl Orderbookf64 for SnapShot{
-    fn get_bids_btm(&self) -> &BTreeMap<Price, Quantity> {
+    fn get_bids_btm(&self) -> &BTreeMap<OrderedFloat<f64>, f64> {
         &self.binance_depth.bid_list
     }
-    fn get_asks_btm(&self) -> &BTreeMap<Price, Quantity> {
+    fn get_asks_btm(&self) -> &BTreeMap<OrderedFloat<f64>, f64> {
         &self.binance_depth.ask_list
     }
 }
