@@ -16,7 +16,7 @@ pub trait Strategy<T>: Send + Sync {
 pub trait OrderBookStrategy<T>:Send + Sync{
     type Output;
     fn on_orderbook_update(&mut self, input: T) -> Self::Output;
-    fn name(&self) -> String;
+    fn strategy_cxt(&self) -> StrategyContext;
 }
 pub trait IsClosed {
     fn is_closed(&self) -> bool;

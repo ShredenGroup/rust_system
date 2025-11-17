@@ -183,3 +183,11 @@ impl BatchTradeTickerf64<TradeTick> for SnapShot{
         self.trade_tick.get_batch_trade_ticker()
     }
 }
+impl Orderbookf64 for SnapShot{
+    fn get_bids_btm(&self) -> &BTreeMap<Price, Quantity> {
+        &self.binance_depth.bid_list
+    }
+    fn get_asks_btm(&self) -> &BTreeMap<Price, Quantity> {
+        &self.binance_depth.ask_list
+    }
+}

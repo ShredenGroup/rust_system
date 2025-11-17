@@ -17,8 +17,3 @@ impl MLV1Strategy{
         }
     }
 }
-impl Strategy for MLV1Strategy{
-    fn on_kline_update(&mut self, input: Arc<T>) -> Self::Output {
-        
-    }
-}
