@@ -206,38 +206,65 @@ impl WebSocketManager {
             // 创建专门用于 KlineData 的通道
             let (kline_tx, mut kline_rx) = mpsc::unbounded_channel::<KlineData>();
             
-            // 启动消息转发任务
+            // 启动消息转发任务 - 这个任务会持续运行，直到通道关闭
             let message_tx_clone = message_tx.clone();
-            tokio::spawn(async move {
+            let forward_handle = tokio::spawn(async move {
+                let mut forward_count = 0;
                 while let Some(data) = kline_rx.recv().await {
+                    forward_count += 1;
                     if let Err(e) = message_tx_clone.send(WebSocketMessage::Kline(Arc::new(data))) {
-                        websocket_log!(warn, "Failed to forward kline message: {}", e);
+                        websocket_log!(warn, "Failed to forward kline message: {} (message_tx closed, total forwarded: {})", e, forward_count);
+                        // 如果 message_tx 关闭了，说明主循环已经退出，我们也应该退出
                         break;
                     }
                 }
+                websocket_log!(info, "Message forwarding task exited (total forwarded: {})", forward_count);
             });
             
             // 使用带重试的批量订阅方法
+            // 注意：即使重连失败，消息转发任务也会继续运行直到通道关闭
+            // kline_tx 会在 subscribe_multiple_klines_with_reconnect 返回时自动 drop
             let result = ws_client.subscribe_multiple_klines_with_reconnect(
                 &symbols, 
                 &interval, 
-                kline_tx,
+                kline_tx,  // kline_tx 会被 move 到这里，当函数返回时会自动 drop
                 3, // max_retries
                 std::time::Duration::from_millis(100) // retry_delay
             ).await;
             
+            // subscribe_multiple_klines_with_reconnect 返回后，kline_tx 已经被 drop
+            // 消息转发任务会收到 None 并退出
+            // 等待消息转发任务完成（最多等待1秒）
+            match tokio::time::timeout(std::time::Duration::from_secs(1), forward_handle).await {
+                Ok(result) => {
+                    if let Err(e) = result {
+                        websocket_log!(warn, "Message forwarding task panicked: {:?}", e);
+                    } else {
+                        websocket_log!(info, "Message forwarding task completed");
+                    }
+                }
+                Err(_) => {
+                    websocket_log!(warn, "Message forwarding task did not complete within timeout, aborting");
+                    // 注意：forward_handle 已经被 move 到 timeout 中，无法 abort
+                    // 但这不是问题，因为 kline_tx 已经 drop，任务应该很快退出
+                }
+            }
+            
             if let Err(e) = result {
-                websocket_log!(warn, "Multi kline connection failed: {}", e);
+                websocket_log!(error, "Multi kline connection failed after all retries: {}", e);
                 // 更新连接状态
                 let mut conns = connections.lock().await;
                 if let Some((_, info)) = conns.get_mut(&connection_id_clone) {
                     info.status = ConnectionStatus::Error(e.to_string());
                 }
+            } else {
+                websocket_log!(warn, "Multi kline connection task completed unexpectedly");
             }
             
             // 从连接映射中移除
             let mut conns = connections.lock().await;
             conns.remove(&connection_id_clone);
+            websocket_log!(info, "Multi kline connection task exited, connection_id: {}", connection_id_clone);
         });
         
         // 保存连接句柄和信息

@@ -265,30 +265,52 @@ impl Q1Factory {
         // 处理实时数据
         info!("🎯 开始接收实时数据...");
         
-        while let Some(message) = ws_rx.recv().await {
-            _message_count += 1;
+        // 使用 tokio::select! 同时监听多个任务
+        tokio::select! {
+            // 主循环：接收 WebSocket 消息
+            _ = async {
+                while let Some(message) = ws_rx.recv().await {
+                    _message_count += 1;
 
-            match message {
-                WebSocketMessage::Kline(kline_data) => {
-                    // 发送数据到策略管理器
-                    let ws_kline_data = (*kline_data).clone();
-                    let unified_data = UnifiedKlineData::WebSocket(ws_kline_data);
-                    if let Err(e) = strategy_data_tx.send(Arc::new(unified_data)).await {
-                        error!("❌ 发送数据到策略管理器失败: {}", e);
+                    match message {
+                        WebSocketMessage::Kline(kline_data) => {
+                            // 发送数据到策略管理器
+                            let ws_kline_data = (*kline_data).clone();
+                            let unified_data = UnifiedKlineData::WebSocket(ws_kline_data);
+                            if let Err(e) = strategy_data_tx.send(Arc::new(unified_data)).await {
+                                error!("❌ 发送数据到策略管理器失败: {}", e);
+                                break;
+                            }
+                        }
+                        _ => {}
                     }
                 }
-                _ => {}
+                // WebSocket 连接断开
+                error!("🔌 WebSocket 连接已断开，主循环退出");
+                error!("📊 共处理了 {} 条消息", _message_count);
+            } => {
+                info!("📡 WebSocket 消息接收循环已退出");
+            }
+            // 信号处理任务异常
+            result = signal_manager_handle => {
+                if let Err(e) = result {
+                    error!("❌ 信号处理任务异常: {}", e);
+                } else {
+                    info!("✅ 信号处理任务正常退出");
+                }
+            }
+            // 策略管理器任务异常
+            result = strategy_manager_handle => {
+                if let Err(e) = result {
+                    error!("❌ 策略管理器任务异常: {:?}", e);
+                } else {
+                    info!("✅ 策略管理器任务正常退出");
+                }
             }
         }
-        // 等待所有任务完成
-        if let Err(e) = signal_manager_handle.await {
-            eprintln!("❌ 信号处理任务异常: {}", e);
-        }
 
-        if let Err(e) = strategy_manager_handle.await {
-            eprintln!("❌ 策略管理器任务异常: {:?}", e);
-        }
-
+        // 记录程序退出
+        error!("🛑 Q1策略程序退出");
         Ok(())
     }
 }

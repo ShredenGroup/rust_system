@@ -632,8 +632,9 @@ impl BinanceWebSocket {
                 Message::Text(text) => {
                     if let Ok(data) = serde_json::from_str::<KlineData>(&text) {
                         if let Err(e) = tx.send(data) {
-                            websocket_log!(warn, "Failed to send kline message: {}", e);
-                            break;
+                            websocket_log!(warn, "Failed to send kline message: {} (channel closed)", e);
+                            // 通道关闭，返回错误以便触发重连
+                            return Err(anyhow::anyhow!("Channel closed while sending kline message: {}", e));
                         }
                     }
                 }
@@ -641,10 +642,14 @@ impl BinanceWebSocket {
                     if let Some(frame) = close_frame {
                         websocket_log!(warn, "Multiple kline streams closed with code: {:?}, reason: {}", 
                             frame.code, frame.reason);
+                        // 返回错误以便触发重连
+                        return Err(anyhow::anyhow!("WebSocket closed with code: {:?}, reason: {}", 
+                            frame.code, frame.reason));
                     } else {
                         websocket_log!(warn, "Multiple kline streams connection closed without close frame (likely network issue)");
+                        // 返回错误以便触发重连
+                        return Err(anyhow::anyhow!("WebSocket connection closed without close frame (likely network issue)"));
                     }
-                    break;
                 }
                 Message::Ping(_) => {
                     websocket_log!(debug, "Received ping from multiple kline streams");
@@ -695,6 +700,7 @@ impl BinanceWebSocket {
     }
 
     /// 带重试机制的多个 Kline 订阅
+    /// 注意：此方法会无限重连，直到达到最大重试次数
     pub async fn subscribe_multiple_klines_with_reconnect(
         &self,
         symbols: &[String],
@@ -708,8 +714,14 @@ impl BinanceWebSocket {
         loop {
             match self.subscribe_multiple_klines(symbols, interval, tx.clone()).await {
                 Ok(_) => {
-                    websocket_log!(info, "Multiple Kline WebSocket connection completed normally");
-                    break;
+                    // 正常情况下不应该到达这里，因为连接断开会返回错误
+                    websocket_log!(warn, "Multiple Kline WebSocket connection completed unexpectedly, will retry");
+                    retry_count += 1;
+                    if retry_count >= max_retries {
+                        return Err(anyhow::anyhow!("Max retries reached for multiple kline connection"));
+                    }
+                    websocket_log!(info, "Retrying Multiple Kline connection in {:?}...", retry_delay);
+                    tokio::time::sleep(retry_delay).await;
                 }
                 Err(e) => {
                     retry_count += 1;
@@ -717,6 +729,7 @@ impl BinanceWebSocket {
                         retry_count, max_retries, e);
 
                     if retry_count >= max_retries {
+                        websocket_log!(error, "Multiple Kline WebSocket connection failed after {} attempts, giving up", max_retries);
                         return Err(e);
                     }
 
@@ -725,8 +738,6 @@ impl BinanceWebSocket {
                 }
             }
         }
-
-        Ok(())
     }
 
     /// 订阅 Book Ticker 数据
