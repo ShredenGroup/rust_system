@@ -927,11 +927,38 @@ impl MexcWebSocket {
 
         let (mut write, mut read) = ws_stream.split();
 
+        // 发送订阅账户更新请求
+        let subscribe_msg = serde_json::json!({
+            "method": "SUBSCRIPTION",
+            "params": [
+                "spot@private.account.v3.api.pb"
+            ]
+        });
+
+        let subscribe_text = subscribe_msg.to_string();
+        println!("📤 发送账户订阅请求: {}", subscribe_text);
+        
+        let msg = WsMessage::Text(subscribe_text);
+        if let Err(e) = write.send(msg).await {
+            return Err(anyhow::anyhow!("发送订阅请求失败: {}", e));
+        }
+        println!("✅ 账户订阅请求已发送");
+
         // 处理接收到的消息
         while let Some(msg) = read.next().await {
             match msg? {
                 WsMessage::Text(text) => {
                     println!("📥 收到用户数据文本消息: {}", text);
+                    
+                    // 检查是否是订阅响应
+                    if let Ok(response) = serde_json::from_str::<serde_json::Value>(&text) {
+                        if let Some(method) = response.get("method") {
+                            if method == "SUBSCRIPTION" {
+                                println!("✅ 订阅确认: {}", text);
+                                continue; // 跳过订阅确认消息，不发送到通道
+                            }
+                        }
+                    }
                     
                     // 发送到通道
                     if let Err(e) = tx.send(text) {
@@ -940,20 +967,47 @@ impl MexcWebSocket {
                     }
                 }
                 WsMessage::Binary(data) => {
-                    println!("📥 收到用户数据二进制消息，长度: {}", data.len());
+                    println!("📥 收到用户数据二进制消息（protobuf），长度: {}", data.len());
                     
-                    // 尝试解析为字符串（可能是 JSON）
-                    if let Ok(text) = String::from_utf8(data.clone()) {
-                        if let Err(e) = tx.send(text) {
-                            eprintln!("❌ 发送用户数据消息到通道失败: {}", e);
-                            break;
+                    // 尝试解析为 MEXC protobuf 格式
+                    match PushDataV3ApiWrapper::decode(&*data) {
+                        Ok(wrapper) => {
+                            println!("✅ 解析 protobuf 成功: 消息类型={}", wrapper.get_message_type());
+                            
+                            // 检查是否是账户更新
+                            if let Some(account) = wrapper.extract_account_data() {
+                                println!("💰 账户更新:");
+                                println!("   币种: {}", account.vcoin_name);
+                                println!("   可用余额: {}", account.balance_amount);
+                                println!("   余额变化: {}", account.balance_amount_change);
+                                println!("   冻结余额: {}", account.frozen_amount);
+                                println!("   变化类型: {}", account.r#type);
+                            }
+                            
+                            // 将 protobuf 数据转换为 JSON 字符串发送到通道
+                            // 这里可以进一步解析并格式化
+                            let hex_data = hex::encode(&data);
+                            if let Err(e) = tx.send(format!("PROTOBUF_DATA:{}", hex_data)) {
+                                eprintln!("❌ 发送用户数据消息到通道失败: {}", e);
+                                break;
+                            }
                         }
-                    } else {
-                        // 如果是二进制数据，转换为十六进制字符串
-                        let hex_data = hex::encode(&data);
-                        if let Err(e) = tx.send(format!("BINARY_DATA:{}", hex_data)) {
-                            eprintln!("❌ 发送用户数据消息到通道失败: {}", e);
-                            break;
+                        Err(e) => {
+                            println!("⚠️  解析 protobuf 失败: {}，尝试作为文本处理", e);
+                            // 如果解析失败，尝试作为文本处理
+                            if let Ok(text) = String::from_utf8(data.clone()) {
+                                if let Err(e) = tx.send(text) {
+                                    eprintln!("❌ 发送用户数据消息到通道失败: {}", e);
+                                    break;
+                                }
+                            } else {
+                                // 转换为十六进制字符串
+                                let hex_data = hex::encode(&data);
+                                if let Err(e) = tx.send(format!("BINARY_DATA:{}", hex_data)) {
+                                    eprintln!("❌ 发送用户数据消息到通道失败: {}", e);
+                                    break;
+                                }
+                            }
                         }
                     }
                 }
