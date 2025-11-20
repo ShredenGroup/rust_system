@@ -228,7 +228,7 @@ impl WebSocketManager {
                 &symbols, 
                 &interval, 
                 kline_tx,  // kline_tx 会被 move 到这里，当函数返回时会自动 drop
-                3, // max_retries
+                10000,
                 std::time::Duration::from_millis(100) // retry_delay
             ).await;
             

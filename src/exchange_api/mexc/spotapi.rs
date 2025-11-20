@@ -201,6 +201,168 @@ impl MexcSpotApi {
 
         self.new_order(request).await
     }
+
+    /// 创建 User Data Stream listenKey
+    ///
+    /// # Returns
+    /// * `Result<String>` - listenKey
+    ///
+    /// # Example
+    /// ```rust
+    /// let listen_key = api.create_user_data_stream().await?;
+    /// ```
+    pub async fn create_user_data_stream(&self) -> Result<String> {
+        let timestamp = Self::get_timestamp();
+        let mut params = HashMap::new();
+        params.insert("timestamp".to_string(), timestamp.to_string());
+        params.insert("recvWindow".to_string(), "60000".to_string());
+
+        let query_string = self.build_query_string(&params);
+        let signature = self.generate_signature(&query_string);
+
+        let url = format!(
+            "{}/api/v3/userDataStream?{}&signature={}",
+            self.base_url, query_string, signature
+        );
+
+        let response = self
+            .client
+            .post(&url)
+            .header("X-MEXC-APIKEY", &self.api_key)
+            .send()
+            .await?;
+
+        if !response.status().is_success() {
+            let error_text = response.text().await?;
+            return Err(anyhow::anyhow!("创建 listenKey 失败: {}", error_text));
+        }
+
+        let result: crate::dto::mexc::rest_api::MexcListenKeyResponse = response.json().await?;
+        Ok(result.listen_key)
+    }
+
+    /// 更新 User Data Stream listenKey 有效期（延长 60 分钟）
+    ///
+    /// # Arguments
+    /// * `listen_key` - 要更新的 listenKey
+    ///
+    /// # Returns
+    /// * `Result<()>` - 成功返回 Ok(())
+    ///
+    /// # Example
+    /// ```rust
+    /// api.update_user_data_stream(&listen_key).await?;
+    /// ```
+    pub async fn update_user_data_stream(&self, listen_key: &str) -> Result<()> {
+        let timestamp = Self::get_timestamp();
+        let mut params = HashMap::new();
+        params.insert("listenKey".to_string(), listen_key.to_string());
+        params.insert("timestamp".to_string(), timestamp.to_string());
+        params.insert("recvWindow".to_string(), "60000".to_string());
+
+        let query_string = self.build_query_string(&params);
+        let signature = self.generate_signature(&query_string);
+
+        let url = format!(
+            "{}/api/v3/userDataStream?{}&signature={}",
+            self.base_url, query_string, signature
+        );
+
+        let response = self
+            .client
+            .put(&url)
+            .header("X-MEXC-APIKEY", &self.api_key)
+            .send()
+            .await?;
+
+        if !response.status().is_success() {
+            let error_text = response.text().await?;
+            return Err(anyhow::anyhow!("更新 listenKey 失败: {}", error_text));
+        }
+
+        Ok(())
+    }
+
+    /// 删除 User Data Stream listenKey（关闭流）
+    ///
+    /// # Arguments
+    /// * `listen_key` - 要删除的 listenKey
+    ///
+    /// # Returns
+    /// * `Result<()>` - 成功返回 Ok(())
+    ///
+    /// # Example
+    /// ```rust
+    /// api.delete_user_data_stream(&listen_key).await?;
+    /// ```
+    pub async fn delete_user_data_stream(&self, listen_key: &str) -> Result<()> {
+        let timestamp = Self::get_timestamp();
+        let mut params = HashMap::new();
+        params.insert("listenKey".to_string(), listen_key.to_string());
+        params.insert("timestamp".to_string(), timestamp.to_string());
+        params.insert("recvWindow".to_string(), "60000".to_string());
+
+        let query_string = self.build_query_string(&params);
+        let signature = self.generate_signature(&query_string);
+
+        let url = format!(
+            "{}/api/v3/userDataStream?{}&signature={}",
+            self.base_url, query_string, signature
+        );
+
+        let response = self
+            .client
+            .delete(&url)
+            .header("X-MEXC-APIKEY", &self.api_key)
+            .send()
+            .await?;
+
+        if !response.status().is_success() {
+            let error_text = response.text().await?;
+            return Err(anyhow::anyhow!("删除 listenKey 失败: {}", error_text));
+        }
+
+        Ok(())
+    }
+
+    /// 获取所有有效的 listenKey
+    ///
+    /// # Returns
+    /// * `Result<Vec<String>>` - listenKey 列表
+    ///
+    /// # Example
+    /// ```rust
+    /// let listen_keys = api.get_user_data_streams().await?;
+    /// ```
+    pub async fn get_user_data_streams(&self) -> Result<Vec<String>> {
+        let timestamp = Self::get_timestamp();
+        let mut params = HashMap::new();
+        params.insert("timestamp".to_string(), timestamp.to_string());
+        params.insert("recvWindow".to_string(), "60000".to_string());
+
+        let query_string = self.build_query_string(&params);
+        let signature = self.generate_signature(&query_string);
+
+        let url = format!(
+            "{}/api/v3/userDataStream?{}&signature={}",
+            self.base_url, query_string, signature
+        );
+
+        let response = self
+            .client
+            .get(&url)
+            .header("X-MEXC-APIKEY", &self.api_key)
+            .send()
+            .await?;
+
+        if !response.status().is_success() {
+            let error_text = response.text().await?;
+            return Err(anyhow::anyhow!("获取 listenKey 列表失败: {}", error_text));
+        }
+
+        let result: crate::dto::mexc::rest_api::MexcListenKeysResponse = response.json().await?;
+        Ok(result.listen_keys)
+    }
 }
 
 #[cfg(test)]

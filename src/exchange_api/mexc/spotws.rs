@@ -878,4 +878,112 @@ impl MexcWebSocket {
 
         Ok(())
     }
+
+    /// 订阅 User Data Stream（用户数据流）
+    ///
+    /// User Data Stream 用于接收账户更新、订单更新等用户相关数据。
+    /// 需要先通过 REST API 获取 listenKey，然后使用 listenKey 连接 WebSocket。
+    ///
+    /// # Arguments
+    /// * `listen_key` - 通过 REST API 获取的 listenKey
+    /// * `tx` - 消息发送通道，接收用户数据消息
+    ///
+    /// # Returns
+    /// * `Result<()>` - 成功返回 Ok(())
+    ///
+    /// # Example
+    /// ```rust
+    /// // 1. 先通过 REST API 获取 listenKey
+    /// let listen_key = api.create_user_data_stream().await?;
+    ///
+    /// // 2. 使用 listenKey 订阅 User Data Stream
+    /// let (tx, mut rx) = mpsc::unbounded_channel();
+    /// mexc_ws.subscribe_user_data_stream(&listen_key, tx).await?;
+    ///
+    /// // 3. 接收消息
+    /// while let Some(msg) = rx.recv().await {
+    ///     println!("收到用户数据: {}", msg);
+    /// }
+    /// ```
+    ///
+    /// # Note
+    /// - listenKey 有效期为 60 分钟，需要定期调用 PUT /api/v3/userDataStream 延长有效期
+    /// - 单个连接最多保持 24 小时，之后会被服务器断开
+    /// - 每个 UID 最多可以申请 60 个 listenKey
+    /// - 每个 listenKey 最多支持 5 个 WebSocket 连接
+    pub async fn subscribe_user_data_stream(
+        &self,
+        listen_key: &str,
+        tx: mpsc::UnboundedSender<String>,
+    ) -> anyhow::Result<()> {
+        // 构建 WebSocket URL，包含 listenKey 作为查询参数
+        let ws_url = format!("{}?listenKey={}", self.base_url, listen_key);
+        println!("🔌 连接 MEXC User Data Stream WebSocket: {}", ws_url);
+
+        let url: Url = Url::parse(&ws_url)?;
+        let (ws_stream, _) = connect_async(url).await?;
+
+        println!("✅ MEXC User Data Stream WebSocket 连接成功");
+
+        let (mut write, mut read) = ws_stream.split();
+
+        // 处理接收到的消息
+        while let Some(msg) = read.next().await {
+            match msg? {
+                WsMessage::Text(text) => {
+                    println!("📥 收到用户数据文本消息: {}", text);
+                    
+                    // 发送到通道
+                    if let Err(e) = tx.send(text) {
+                        eprintln!("❌ 发送用户数据消息到通道失败: {}", e);
+                        break;
+                    }
+                }
+                WsMessage::Binary(data) => {
+                    println!("📥 收到用户数据二进制消息，长度: {}", data.len());
+                    
+                    // 尝试解析为字符串（可能是 JSON）
+                    if let Ok(text) = String::from_utf8(data.clone()) {
+                        if let Err(e) = tx.send(text) {
+                            eprintln!("❌ 发送用户数据消息到通道失败: {}", e);
+                            break;
+                        }
+                    } else {
+                        // 如果是二进制数据，转换为十六进制字符串
+                        let hex_data = hex::encode(&data);
+                        if let Err(e) = tx.send(format!("BINARY_DATA:{}", hex_data)) {
+                            eprintln!("❌ 发送用户数据消息到通道失败: {}", e);
+                            break;
+                        }
+                    }
+                }
+                WsMessage::Close(close_frame) => {
+                    if let Some(frame) = close_frame {
+                        eprintln!(
+                            "❌ MEXC User Data Stream WebSocket 连接关闭: code={:?}, reason={}",
+                            frame.code, frame.reason
+                        );
+                    } else {
+                        eprintln!("❌ MEXC User Data Stream WebSocket 连接关闭（无关闭帧）");
+                    }
+                    break;
+                }
+                WsMessage::Ping(data) => {
+                    println!("🏓 收到 Ping，发送 Pong 响应");
+                    let pong_msg = WsMessage::Pong(data);
+                    if let Err(e) = write.send(pong_msg).await {
+                        eprintln!("❌ 发送 Pong 失败: {}", e);
+                        break;
+                    }
+                }
+                WsMessage::Pong(_) => {
+                    println!("🏓 收到 Pong");
+                }
+                _ => {}
+            }
+        }
+
+        println!("🔌 MEXC User Data Stream WebSocket 连接已断开");
+        Ok(())
+    }
 }

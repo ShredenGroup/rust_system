@@ -120,3 +120,19 @@ impl MexcOrderRequest {
     }
 }
 
+/// MEXC User Data Stream - 创建 listenKey 响应
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MexcListenKeyResponse {
+    /// listenKey
+    #[serde(rename = "listenKey")]
+    pub listen_key: String,
+}
+
+/// MEXC User Data Stream - 获取所有有效 listenKey 响应
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MexcListenKeysResponse {
+    /// listenKey 列表
+    #[serde(rename = "listenKey")]
+    pub listen_keys: Vec<String>,
+}
+
