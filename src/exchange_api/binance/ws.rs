@@ -1,7 +1,7 @@
 use crate::common::consts::BINANCE_WS;
 use crate::dto::binance::websocket::{MarkPriceData, BinancePartialDepth, BinanceDepthUpdate, KlineData, BookTickerData, BinanceTradeData};
 use anyhow::Result;
-use futures::StreamExt;
+use futures::{StreamExt, SinkExt};
 use serde_json;
 use crate::websocket_log;
 use std::time::{Duration, Instant};
@@ -48,7 +48,7 @@ impl BinanceWebSocket {
 
         websocket_log!(info, "WebSocket connected successfully");
 
-        let (_, mut read) = ws_stream.split();
+        let (mut write, mut read) = ws_stream.split();
 
         // 处理接收到的消息
         while let Some(msg) = read.next().await {
@@ -70,9 +70,12 @@ impl BinanceWebSocket {
                     }
                     break;
                 }
-                Message::Ping(_data) => {
-                    // 可以在这里发送 pong 响应
-                    websocket_log!(debug, "Received ping");
+                Message::Ping(data) => {
+                    websocket_log!(debug, "Received ping, sending pong");
+                    if let Err(e) = write.send(Message::Pong(data)).await {
+                        websocket_log!(warn, "Failed to send pong: {}", e);
+                        return Err(anyhow::anyhow!("Failed to send pong: {}", e));
+                    }
                 }
                 Message::Pong(_) => {
                     websocket_log!(debug, "Received pong");
@@ -113,7 +116,7 @@ impl BinanceWebSocket {
 
         websocket_log!(info, "Depth WebSocket connected successfully");
 
-        let (_, mut read) = ws_stream.split();
+        let (mut write, mut read) = ws_stream.split();
 
         while let Some(msg) = read.next().await {
             match msg? {
@@ -126,8 +129,12 @@ impl BinanceWebSocket {
                     websocket_log!(info, "Depth WebSocket connection closed");
                     break;
                 }
-                Message::Ping(_) => {
-                    websocket_log!(debug, "Received ping from depth stream");
+                Message::Ping(data) => {
+                    websocket_log!(debug, "Received ping from depth stream, sending pong");
+                    if let Err(e) = write.send(Message::Pong(data)).await {
+                        websocket_log!(warn, "Failed to send pong: {}", e);
+                        return Err(anyhow::anyhow!("Failed to send pong: {}", e));
+                    }
                 }
                 Message::Pong(_) => {
                     websocket_log!(debug, "Received pong from depth stream");
@@ -161,7 +168,7 @@ impl BinanceWebSocket {
 
         websocket_log!(info, "Multiple WebSocket streams connected successfully");
 
-        let (_, mut read) = ws_stream.split();
+        let (mut write, mut read) = ws_stream.split();
 
         while let Some(msg) = read.next().await {
             match msg? {
@@ -182,8 +189,12 @@ impl BinanceWebSocket {
                     }
                     break;
                 }
-                Message::Ping(_) => {
-                    websocket_log!(debug, "Received ping");
+                Message::Ping(data) => {
+                    websocket_log!(debug, "Received ping, sending pong");
+                    if let Err(e) = write.send(Message::Pong(data)).await {
+                        websocket_log!(warn, "Failed to send pong: {}", e);
+                        return Err(anyhow::anyhow!("Failed to send pong: {}", e));
+                    }
                 }
                 Message::Pong(_) => {
                     websocket_log!(debug, "Received pong");
@@ -223,7 +234,7 @@ impl BinanceWebSocket {
 
         websocket_log!(info, "Multiple depth streams connected successfully");
 
-        let (_, mut read) = ws_stream.split();
+        let (mut write, mut read) = ws_stream.split();
 
         while let Some(msg) = read.next().await {
             match msg? {
@@ -235,8 +246,12 @@ impl BinanceWebSocket {
                     websocket_log!(info, "Multiple depth streams connection closed");
                     break;
                 }
-                Message::Ping(_) => {
-                    websocket_log!(debug, "Received ping from multiple depth streams");
+                Message::Ping(data) => {
+                    websocket_log!(debug, "Received ping from multiple depth streams, sending pong");
+                    if let Err(e) = write.send(Message::Pong(data)).await {
+                        websocket_log!(warn, "Failed to send pong: {}", e);
+                        return Err(anyhow::anyhow!("Failed to send pong: {}", e));
+                    }
                 }
                 Message::Pong(_) => {
                     websocket_log!(debug, "Received pong from multiple depth streams");
@@ -286,7 +301,7 @@ impl BinanceWebSocket {
 
         websocket_log!(info, "Partial Depth WebSocket connected successfully");
 
-        let (_, mut read) = ws_stream.split();
+        let (mut write, mut read) = ws_stream.split();
 
         while let Some(msg) = read.next().await {
             match msg? {
@@ -311,8 +326,12 @@ impl BinanceWebSocket {
                     websocket_log!(warn, "Partial depth WebSocket connection closed");
                     break;
                 }
-                Message::Ping(_) => {
-                    websocket_log!(debug, "Received ping from partial depth stream");
+                Message::Ping(data) => {
+                    websocket_log!(debug, "Received ping from partial depth stream, sending pong");
+                    if let Err(e) = write.send(Message::Pong(data)).await {
+                        websocket_log!(warn, "Failed to send pong: {}", e);
+                        return Err(anyhow::anyhow!("Failed to send pong: {}", e));
+                    }
                 }
                 Message::Pong(_) => {
                     websocket_log!(debug, "Received pong from partial depth stream");
@@ -368,7 +387,7 @@ impl BinanceWebSocket {
 
         websocket_log!(info, "Multiple partial depth streams connected successfully");
 
-        let (_, mut read) = ws_stream.split();
+        let (mut write, mut read) = ws_stream.split();
 
         while let Some(msg) = read.next().await {
             match msg? {
@@ -390,8 +409,12 @@ impl BinanceWebSocket {
                     websocket_log!(warn, "Multiple partial depth WebSocket connection closed");
                     break;
                 }
-                Message::Ping(_) => {
-                    websocket_log!(debug, "Received ping from multiple partial depth streams");
+                Message::Ping(data) => {
+                    websocket_log!(debug, "Received ping from multiple partial depth streams, sending pong");
+                    if let Err(e) = write.send(Message::Pong(data)).await {
+                        websocket_log!(warn, "Failed to send pong: {}", e);
+                        return Err(anyhow::anyhow!("Failed to send pong: {}", e));
+                    }
                 }
                 Message::Pong(_) => {
                     websocket_log!(debug, "Received pong from multiple partial depth streams");
@@ -423,7 +446,7 @@ impl BinanceWebSocket {
 
         websocket_log!(info, "Trade WebSocket connected successfully");
 
-        let (_, mut read) = ws_stream.split();
+        let (mut write, mut read) = ws_stream.split();
 
         while let Some(msg) = read.next().await {
             match msg? {
@@ -441,8 +464,12 @@ impl BinanceWebSocket {
                     websocket_log!(info, "Trade WebSocket connection closed");
                     break;
                 }
-                Message::Ping(_) => {
-                    websocket_log!(debug, "Received ping from trade stream");
+                Message::Ping(data) => {
+                    websocket_log!(debug, "Received ping from trade stream, sending pong");
+                    if let Err(e) = write.send(Message::Pong(data)).await {
+                        websocket_log!(warn, "Failed to send pong: {}", e);
+                        return Err(anyhow::anyhow!("Failed to send pong: {}", e));
+                    }
                 }
                 Message::Pong(_) => {
                     websocket_log!(debug, "Received pong from trade stream");
@@ -479,7 +506,7 @@ impl BinanceWebSocket {
 
         websocket_log!(info, "Multiple trade streams connected successfully");
 
-        let (_, mut read) = ws_stream.split();
+        let (mut write, mut read) = ws_stream.split();
 
         while let Some(msg) = read.next().await {
             match msg? {
@@ -497,8 +524,12 @@ impl BinanceWebSocket {
                     websocket_log!(info, "Multiple trade WebSocket connection closed");
                     break;
                 }
-                Message::Ping(_) => {
-                    websocket_log!(debug, "Received ping from multiple trade streams");
+                Message::Ping(data) => {
+                    websocket_log!(debug, "Received ping from multiple trade streams, sending pong");
+                    if let Err(e) = write.send(Message::Pong(data)).await {
+                        websocket_log!(warn, "Failed to send pong: {}", e);
+                        return Err(anyhow::anyhow!("Failed to send pong: {}", e));
+                    }
                 }
                 Message::Pong(_) => {
                     websocket_log!(debug, "Received pong from multiple trade streams");
@@ -569,7 +600,7 @@ impl BinanceWebSocket {
 
         websocket_log!(info, "Kline WebSocket connected successfully");
 
-        let (_, mut read) = ws_stream.split();
+        let (mut write, mut read) = ws_stream.split();
 
         while let Some(msg) = read.next().await {
             match msg? {
@@ -595,8 +626,12 @@ impl BinanceWebSocket {
                         return Err(anyhow::anyhow!("WebSocket connection closed without close frame (likely network issue)"));
                     }
                 }
-                Message::Ping(_) => {
-                    websocket_log!(debug, "Received ping from kline stream");
+                Message::Ping(data) => {
+                    websocket_log!(debug, "Received ping from kline stream, sending pong");
+                    if let Err(e) = write.send(Message::Pong(data)).await {
+                        websocket_log!(warn, "Failed to send pong: {}", e);
+                        return Err(anyhow::anyhow!("Failed to send pong: {}", e));
+                    }
                 }
                 Message::Pong(_) => {
                     websocket_log!(debug, "Received pong from kline stream");
@@ -630,7 +665,7 @@ impl BinanceWebSocket {
 
         websocket_log!(info, "Multiple kline streams connected successfully");
 
-        let (_, mut read) = ws_stream.split();
+        let (mut write, mut read) = ws_stream.split();
 
         while let Some(msg) = read.next().await {
             match msg? {
@@ -656,8 +691,12 @@ impl BinanceWebSocket {
                         return Err(anyhow::anyhow!("WebSocket connection closed without close frame (likely network issue)"));
                     }
                 }
-                Message::Ping(_) => {
-                    websocket_log!(debug, "Received ping from multiple kline streams");
+                Message::Ping(data) => {
+                    websocket_log!(debug, "Received ping from multiple kline streams, sending pong");
+                    if let Err(e) = write.send(Message::Pong(data)).await {
+                        websocket_log!(warn, "Failed to send pong: {}", e);
+                        return Err(anyhow::anyhow!("Failed to send pong: {}", e));
+                    }
                 }
                 Message::Pong(_) => {
                     websocket_log!(debug, "Received pong from multiple kline streams");
@@ -770,7 +809,7 @@ impl BinanceWebSocket {
 
         websocket_log!(info, "Book Ticker WebSocket connected successfully");
 
-        let (_, mut read) = ws_stream.split();
+        let (mut write, mut read) = ws_stream.split();
 
         while let Some(msg) = read.next().await {
             match msg? {
@@ -788,8 +827,12 @@ impl BinanceWebSocket {
                     websocket_log!(info, "Book Ticker WebSocket connection closed");
                     break;
                 }
-                Message::Ping(_) => {
-                    websocket_log!(debug, "Received ping from book ticker stream");
+                Message::Ping(data) => {
+                    websocket_log!(debug, "Received ping from book ticker stream, sending pong");
+                    if let Err(e) = write.send(Message::Pong(data)).await {
+                        websocket_log!(warn, "Failed to send pong: {}", e);
+                        return Err(anyhow::anyhow!("Failed to send pong: {}", e));
+                    }
                 }
                 Message::Pong(_) => {
                     websocket_log!(debug, "Received pong from book ticker stream");
@@ -822,7 +865,7 @@ impl BinanceWebSocket {
 
         websocket_log!(info, "Multiple book ticker streams connected successfully");
 
-        let (_, mut read) = ws_stream.split();
+        let (mut write, mut read) = ws_stream.split();
 
         while let Some(msg) = read.next().await {
             match msg? {
@@ -838,8 +881,12 @@ impl BinanceWebSocket {
                     websocket_log!(info, "Multiple book ticker streams connection closed");
                     break;
                 }
-                Message::Ping(_) => {
-                    websocket_log!(debug, "Received ping from multiple book ticker streams");
+                Message::Ping(data) => {
+                    websocket_log!(debug, "Received ping from multiple book ticker streams, sending pong");
+                    if let Err(e) = write.send(Message::Pong(data)).await {
+                        websocket_log!(warn, "Failed to send pong: {}", e);
+                        return Err(anyhow::anyhow!("Failed to send pong: {}", e));
+                    }
                 }
                 Message::Pong(_) => {
                     websocket_log!(debug, "Received pong from multiple book ticker streams");

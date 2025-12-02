@@ -15,14 +15,14 @@ pub mod trade_tick_u64;
 pub mod enums;
 pub use crate::common::enums::Exchange;
 pub use key::CommonKey;
-pub use order::Order;
+pub use order::{Order, OrderStatus, OrderManager, OrderType};
 pub use order_tick::{OrderTick, OrderTickBuffer};
 pub use orderbook::CommonDepth;
 pub use hft_position::{
     HftPositionKey, HftPositionManager, LockFreePosition, PositionSnapshot,
 };
 pub use position::{
-    OrderStatus, PendingOrder, Position, PositionKey, PositionManager, StrategyPosition,
+    Position, PositionKey, PositionManager, StrategyPosition,
 };
 pub use signal::{LimitSignal, MarketSignal, PositionSide, Side, Signal, TradingSignal};
 pub use strategy::{StrategyContext, StrategySetting, StrategyType};

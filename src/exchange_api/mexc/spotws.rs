@@ -879,41 +879,19 @@ impl MexcWebSocket {
         Ok(())
     }
 
-    /// 订阅 User Data Stream（用户数据流）
-    ///
-    /// User Data Stream 用于接收账户更新、订单更新等用户相关数据。
-    /// 需要先通过 REST API 获取 listenKey，然后使用 listenKey 连接 WebSocket。
+    /// 订阅 User Data Stream（通用方法，可指定订阅的频道）
     ///
     /// # Arguments
     /// * `listen_key` - 通过 REST API 获取的 listenKey
+    /// * `channels` - 要订阅的频道列表
     /// * `tx` - 消息发送通道，接收用户数据消息
     ///
     /// # Returns
     /// * `Result<()>` - 成功返回 Ok(())
-    ///
-    /// # Example
-    /// ```rust
-    /// // 1. 先通过 REST API 获取 listenKey
-    /// let listen_key = api.create_user_data_stream().await?;
-    ///
-    /// // 2. 使用 listenKey 订阅 User Data Stream
-    /// let (tx, mut rx) = mpsc::unbounded_channel();
-    /// mexc_ws.subscribe_user_data_stream(&listen_key, tx).await?;
-    ///
-    /// // 3. 接收消息
-    /// while let Some(msg) = rx.recv().await {
-    ///     println!("收到用户数据: {}", msg);
-    /// }
-    /// ```
-    ///
-    /// # Note
-    /// - listenKey 有效期为 60 分钟，需要定期调用 PUT /api/v3/userDataStream 延长有效期
-    /// - 单个连接最多保持 24 小时，之后会被服务器断开
-    /// - 每个 UID 最多可以申请 60 个 listenKey
-    /// - 每个 listenKey 最多支持 5 个 WebSocket 连接
-    pub async fn subscribe_user_data_stream(
+    async fn subscribe_user_data_stream_internal(
         &self,
         listen_key: &str,
+        channels: Vec<&str>,
         tx: mpsc::UnboundedSender<String>,
     ) -> anyhow::Result<()> {
         // 构建 WebSocket URL，包含 listenKey 作为查询参数
@@ -927,22 +905,20 @@ impl MexcWebSocket {
 
         let (mut write, mut read) = ws_stream.split();
 
-        // 发送订阅账户更新请求
+        // 发送订阅请求
         let subscribe_msg = serde_json::json!({
             "method": "SUBSCRIPTION",
-            "params": [
-                "spot@private.account.v3.api.pb"
-            ]
+            "params": channels
         });
 
         let subscribe_text = subscribe_msg.to_string();
-        println!("📤 发送账户订阅请求: {}", subscribe_text);
+        println!("📤 发送订阅请求: {}", subscribe_text);
         
         let msg = WsMessage::Text(subscribe_text);
         if let Err(e) = write.send(msg).await {
             return Err(anyhow::anyhow!("发送订阅请求失败: {}", e));
         }
-        println!("✅ 账户订阅请求已发送");
+        println!("✅ 订阅请求已发送");
 
         // 处理接收到的消息
         while let Some(msg) = read.next().await {
@@ -972,20 +948,66 @@ impl MexcWebSocket {
                     // 尝试解析为 MEXC protobuf 格式
                     match PushDataV3ApiWrapper::decode(&*data) {
                         Ok(wrapper) => {
-                            println!("✅ 解析 protobuf 成功: 消息类型={}", wrapper.get_message_type());
+                            let msg_type = wrapper.get_message_type();
+                            println!("✅ 解析 protobuf 成功: 消息类型={}", msg_type);
                             
-                            // 检查是否是账户更新
+                            // 处理账户更新
                             if let Some(account) = wrapper.extract_account_data() {
                                 println!("💰 账户更新:");
                                 println!("   币种: {}", account.vcoin_name);
                                 println!("   可用余额: {}", account.balance_amount);
                                 println!("   余额变化: {}", account.balance_amount_change);
                                 println!("   冻结余额: {}", account.frozen_amount);
+                                println!("   冻结变化: {}", account.frozen_amount_change);
                                 println!("   变化类型: {}", account.r#type);
+                                println!("   时间: {}", account.time);
+                            }
+                            
+                            // 处理订单状态更新
+                            if let Some(order) = wrapper.extract_private_orders_data() {
+                                let symbol = wrapper.symbol.as_ref().map(|s| s.as_str()).unwrap_or("N/A");
+                                let status_str = match order.status {
+                                    1 => "未成交",
+                                    2 => "完全成交",
+                                    3 => "部分成交",
+                                    4 => "已取消",
+                                    5 => "部分取消",
+                                    _ => "未知",
+                                };
+                                let trade_type_str = if order.trade_type == 1 { "买入" } else { "卖出" };
+                                
+                                println!("📋 订单状态更新 [{}]:", symbol);
+                                println!("   订单ID: {}", order.client_id);
+                                println!("   价格: {}", order.price);
+                                println!("   数量: {}", order.quantity);
+                                println!("   状态: {} ({})", status_str, order.status);
+                                println!("   方向: {}", trade_type_str);
+                                println!("   剩余数量: {}", order.remain_quantity);
+                                println!("   累计成交: {}", order.cumulative_quantity);
+                                println!("   平均成交价: {}", order.avg_price);
+                                println!("   创建时间: {}", order.create_time);
+                            }
+                            
+                            // 处理订单成交详情
+                            if let Some(deal) = wrapper.extract_private_deals_data() {
+                                let symbol = wrapper.symbol.as_ref().map(|s| s.as_str()).unwrap_or("N/A");
+                                let trade_type_str = if deal.trade_type == 1 { "买入" } else { "卖出" };
+                                let maker_str = if deal.is_maker { "Maker" } else { "Taker" };
+                                
+                                println!("💵 订单成交 [{}]:", symbol);
+                                println!("   成交ID: {}", deal.trade_id);
+                                println!("   订单ID: {}", deal.order_id);
+                                println!("   客户端订单ID: {}", deal.client_order_id);
+                                println!("   成交价格: {}", deal.price);
+                                println!("   成交数量: {}", deal.quantity);
+                                println!("   成交金额: {}", deal.amount);
+                                println!("   方向: {}", trade_type_str);
+                                println!("   类型: {}", maker_str);
+                                println!("   手续费: {} {}", deal.fee_amount, deal.fee_currency);
+                                println!("   成交时间: {}", deal.time);
                             }
                             
                             // 将 protobuf 数据转换为 JSON 字符串发送到通道
-                            // 这里可以进一步解析并格式化
                             let hex_data = hex::encode(&data);
                             if let Err(e) = tx.send(format!("PROTOBUF_DATA:{}", hex_data)) {
                                 eprintln!("❌ 发送用户数据消息到通道失败: {}", e);
@@ -1039,5 +1061,135 @@ impl MexcWebSocket {
 
         println!("🔌 MEXC User Data Stream WebSocket 连接已断开");
         Ok(())
+    }
+
+    /// 订阅账户余额更新
+    ///
+    /// 当账户余额或可用余额发生变化时，服务器会推送账户资产更新。
+    ///
+    /// # Arguments
+    /// * `listen_key` - 通过 REST API 获取的 listenKey
+    /// * `tx` - 消息发送通道，接收账户更新消息
+    ///
+    /// # Returns
+    /// * `Result<()>` - 成功返回 Ok(())
+    ///
+    /// # Example
+    /// ```rust
+    /// let listen_key = api.create_user_data_stream().await?;
+    /// let (tx, mut rx) = mpsc::unbounded_channel();
+    /// mexc_ws.subscribe_user_account_stream(&listen_key, tx).await?;
+    /// ```
+    pub async fn subscribe_user_account_stream(
+        &self,
+        listen_key: &str,
+        tx: mpsc::UnboundedSender<String>,
+    ) -> anyhow::Result<()> {
+        self.subscribe_user_data_stream_internal(
+            listen_key,
+            vec!["spot@private.account.v3.api.pb"],
+            tx,
+        )
+        .await
+    }
+
+    /// 订阅订单状态更新
+    ///
+    /// 当订单状态发生变化时（创建、部分成交、完全成交、取消等），服务器会推送订单状态更新。
+    ///
+    /// # Arguments
+    /// * `listen_key` - 通过 REST API 获取的 listenKey
+    /// * `tx` - 消息发送通道，接收订单状态更新消息
+    ///
+    /// # Returns
+    /// * `Result<()>` - 成功返回 Ok(())
+    ///
+    /// # Example
+    /// ```rust
+    /// let listen_key = api.create_user_data_stream().await?;
+    /// let (tx, mut rx) = mpsc::unbounded_channel();
+    /// mexc_ws.subscribe_user_orders_stream(&listen_key, tx).await?;
+    /// ```
+    pub async fn subscribe_user_orders_stream(
+        &self,
+        listen_key: &str,
+        tx: mpsc::UnboundedSender<String>,
+    ) -> anyhow::Result<()> {
+        self.subscribe_user_data_stream_internal(
+            listen_key,
+            vec!["spot@private.orders.v3.api.pb"],
+            tx,
+        )
+        .await
+    }
+
+    /// 订阅订单成交详情
+    ///
+    /// 当订单成交时，服务器会推送成交详情（价格、数量、手续费等）。
+    ///
+    /// # Arguments
+    /// * `listen_key` - 通过 REST API 获取的 listenKey
+    /// * `tx` - 消息发送通道，接收成交详情消息
+    ///
+    /// # Returns
+    /// * `Result<()>` - 成功返回 Ok(())
+    ///
+    /// # Example
+    /// ```rust
+    /// let listen_key = api.create_user_data_stream().await?;
+    /// let (tx, mut rx) = mpsc::unbounded_channel();
+    /// mexc_ws.subscribe_user_deals_stream(&listen_key, tx).await?;
+    /// ```
+    pub async fn subscribe_user_deals_stream(
+        &self,
+        listen_key: &str,
+        tx: mpsc::UnboundedSender<String>,
+    ) -> anyhow::Result<()> {
+        self.subscribe_user_data_stream_internal(
+            listen_key,
+            vec!["spot@private.deals.v3.api.pb"],
+            tx,
+        )
+        .await
+    }
+
+    /// 订阅所有 User Data Stream（账户、订单、成交）
+    ///
+    /// 同时订阅账户余额更新、订单状态更新和订单成交详情。
+    ///
+    /// # Arguments
+    /// * `listen_key` - 通过 REST API 获取的 listenKey
+    /// * `tx` - 消息发送通道，接收所有用户数据消息
+    ///
+    /// # Returns
+    /// * `Result<()>` - 成功返回 Ok(())
+    ///
+    /// # Example
+    /// ```rust
+    /// let listen_key = api.create_user_data_stream().await?;
+    /// let (tx, mut rx) = mpsc::unbounded_channel();
+    /// mexc_ws.subscribe_user_data_stream(&listen_key, tx).await?;
+    /// ```
+    ///
+    /// # Note
+    /// - listenKey 有效期为 60 分钟，需要定期调用 PUT /api/v3/userDataStream 延长有效期
+    /// - 单个连接最多保持 24 小时，之后会被服务器断开
+    /// - 每个 UID 最多可以申请 60 个 listenKey
+    /// - 每个 listenKey 最多支持 5 个 WebSocket 连接
+    pub async fn subscribe_user_data_stream(
+        &self,
+        listen_key: &str,
+        tx: mpsc::UnboundedSender<String>,
+    ) -> anyhow::Result<()> {
+        self.subscribe_user_data_stream_internal(
+            listen_key,
+            vec![
+                "spot@private.account.v3.api.pb",
+                "spot@private.orders.v3.api.pb",
+                "spot@private.deals.v3.api.pb",
+            ],
+            tx,
+        )
+        .await
     }
 }

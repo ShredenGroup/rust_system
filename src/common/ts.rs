@@ -2,6 +2,7 @@ use super::Exchange;
 use ndarray::Array;
 use ndarray::Ix2;
 use super::{StrategyName,TradingSymbol};
+use crate::models::TradingSignal;
 use crate::models::strategy::StrategyContext;
 pub trait ToArray {
     fn to_ndarray(&self) -> Array<f32, Ix2>;
@@ -14,10 +15,10 @@ pub trait Strategy<T>: Send + Sync {
     fn name(&self) -> String; 
 }
 pub trait OrderBookStrategy<T>:Send + Sync{
-    type Output;
-    fn on_orderbook_update(&mut self, input: T) -> Self::Output;
+    fn on_orderbook_update(&mut self, input: T) -> Option<TradingSignal>;
     fn strategy_cxt(&self) -> StrategyContext;
 }
+
 pub trait IsClosed {
     fn is_closed(&self) -> bool;
 }

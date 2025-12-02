@@ -4,24 +4,17 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use crate::common::enums::{Exchange, PositionSide, StrategyName};
-use crate::models::TradingSymbol;
-
-/// 订单状态
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum OrderStatus {
-    Pending,    // 已发出，等待API响应
-    Submitted,  // API已接收，等待成交
-    Filled,     // 已成交
-    Cancelled,  // 已取消
-    Failed,     // 失败
-}
+use crate::models::{TradingSymbol, OrderStatus, Order};
 
 /// 仓位信息
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Position {
     pub entry_price: f64,
     pub quantity: f64,
-    pub realized_pnl: f64,
+    pub realized_pnl: Option<f64>,
+    pub unrealized_pnl: f64,
+    pub client_timestamp: u64,
+    pub created_timestamp: u64,
     pub last_updated_ts_ms: u64,
 }
 
@@ -30,51 +23,11 @@ impl Default for Position {
         Self {
             entry_price: 0.0,
             quantity: 0.0,
-            realized_pnl: 0.0,
+            realized_pnl: None,
+            unrealized_pnl: 0.0,
+            client_timestamp: 0,
+            created_timestamp: 0,
             last_updated_ts_ms: 0,
-        }
-    }
-}
-
-/// 待处理订单
-#[derive(Debug, Clone)]
-pub struct PendingOrder {
-    pub order_id: Option<i64>,      // API返回的订单ID（可能还未返回）
-    pub client_order_id: Option<String>, // 客户端订单ID
-    pub side: PositionSide,
-    pub quantity: f64,
-    pub status: OrderStatus,
-    pub submitted_at: u64,           // 提交时间戳（毫秒）
-    pub timeout_at: Option<u64>,     // 超时时间（可选）
-}
-
-impl PendingOrder {
-    pub fn new(side: PositionSide, quantity: f64, client_order_id: Option<String>) -> Self {
-        let now = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap()
-            .as_millis() as u64;
-        
-        Self {
-            order_id: None,
-            client_order_id,
-            side,
-            quantity,
-            status: OrderStatus::Pending,
-            submitted_at: now,
-            timeout_at: Some(now + 5000), // 默认5秒超时
-        }
-    }
-    
-    pub fn is_expired(&self) -> bool {
-        if let Some(timeout) = self.timeout_at {
-            let now = SystemTime::now()
-                .duration_since(UNIX_EPOCH)
-                .unwrap()
-                .as_millis() as u64;
-            now > timeout
-        } else {
-            false
         }
     }
 }
@@ -83,7 +36,7 @@ impl PendingOrder {
 #[derive(Debug, Clone)]
 pub struct StrategyPosition {
     pub position: Position,
-    pub pending_orders: Vec<PendingOrder>,  // 待处理的订单列表
+    pub pending_orders: Vec<Order>,  // 待处理的订单列表
     pub last_updated_ts_ms: u64,
 }
 
@@ -152,7 +105,7 @@ impl PositionManager {
     /// 检查是否可以开仓（原子操作）
     /// 
     /// # Returns
-    /// * `Ok(PendingOrder)` - 如果可以开仓，返回待处理订单
+    /// * `Ok(Order)` - 如果可以开仓，返回待处理订单
     /// * `Err(String)` - 如果不能开仓，返回原因
     pub fn try_open_position(
         &self,
@@ -162,7 +115,7 @@ impl PositionManager {
         side: PositionSide,
         quantity: f64,
         client_order_id: Option<String>,
-    ) -> Result<PendingOrder, String> {
+    ) -> Result<Order, String> {
         let key = (exchange, symbol, strategy);
         
         // 原子操作：检查并更新
@@ -184,8 +137,8 @@ impl PositionManager {
         
         // 3. 检查是否有待处理的同方向订单
         let has_pending = strategy_pos.pending_orders.iter().any(|order| {
-            matches!(order.status, OrderStatus::Pending | OrderStatus::Submitted) &&
-            order.side == side
+            matches!(order.internal.status, OrderStatus::Pending | OrderStatus::Submitted) &&
+            order.internal.side == side
         });
         
         if has_pending {
@@ -193,7 +146,7 @@ impl PositionManager {
         }
         
         // 4. 创建待处理订单并记录
-        let pending_order = PendingOrder::new(side, quantity, client_order_id);
+        let pending_order = Order::new(exchange, symbol, side, quantity, client_order_id);
         strategy_pos.pending_orders.push(pending_order.clone());
         
         // 5. 更新版本号（乐观锁）
@@ -216,12 +169,10 @@ impl PositionManager {
         if let Some(mut strategy_pos) = self.inner.get_mut(&key) {
             // 查找对应的待处理订单
             for order in strategy_pos.pending_orders.iter_mut() {
-                if let Some(ref cid) = order.client_order_id {
-                    if cid == client_order_id && order.status == OrderStatus::Pending {
-                        order.order_id = Some(order_id);
-                        order.status = OrderStatus::Submitted;
-                        return Ok(());
-                    }
+                if order.client_order_id == client_order_id && order.internal.status == OrderStatus::Pending {
+                    order.order_id = Some(order_id.to_string());
+                    order.internal.status = OrderStatus::Submitted;
+                    return Ok(());
                 }
             }
             Err("未找到对应的待处理订单".to_string())
@@ -247,8 +198,8 @@ impl PositionManager {
             // 1. 找到对应的订单并标记为已成交
             let mut found = false;
             for order in strategy_pos.pending_orders.iter_mut() {
-                if order.order_id == Some(order_id) {
-                    order.status = OrderStatus::Filled;
+                if order.order_id == Some(order_id.to_string()) {
+                    order.internal.status = OrderStatus::Filled;
                     found = true;
                     break;
                 }
@@ -289,7 +240,8 @@ impl PositionManager {
                         PositionSide::Short => pos.entry_price - fill_price,
                         PositionSide::NoPosition => 0.0,
                     };
-                    pos.realized_pnl += pnl_per_unit * qty_to_reduce;
+                    let pnl_to_add = pnl_per_unit * qty_to_reduce;
+                    pos.realized_pnl = Some(pos.realized_pnl.unwrap_or(0.0) + pnl_to_add);
                     pos.quantity = (pos.quantity.abs() - qty_to_reduce) * if pos.quantity > 0.0 { 1.0 } else { -1.0 };
                 }
             }
@@ -299,7 +251,7 @@ impl PositionManager {
             
             // 3. 清理已成交的订单（可选：保留历史记录）
             strategy_pos.pending_orders.retain(|order| {
-                !matches!(order.status, OrderStatus::Filled | OrderStatus::Cancelled | OrderStatus::Failed)
+                !matches!(order.internal.status, OrderStatus::Filled | OrderStatus::Cancelled | OrderStatus::Failed)
             });
             
             // 4. 更新版本号
@@ -327,22 +279,22 @@ impl PositionManager {
             // 标记订单为失败
             for order in strategy_pos.pending_orders.iter_mut() {
                 let match_order = if let Some(oid) = order_id {
-                    order.order_id == Some(oid)
+                    order.order_id == Some(oid.to_string())
                 } else if let Some(cid) = client_order_id {
-                    order.client_order_id.as_ref().map(|s| s == cid).unwrap_or(false)
+                    order.client_order_id == cid
                 } else {
                     false
                 };
                 
                 if match_order {
-                    order.status = OrderStatus::Failed;
+                    order.internal.status = OrderStatus::Failed;
                     break;
                 }
             }
             
             // 清理失败订单
             strategy_pos.pending_orders.retain(|order| {
-                !matches!(order.status, OrderStatus::Failed | OrderStatus::Cancelled)
+                !matches!(order.internal.status, OrderStatus::Failed | OrderStatus::Cancelled)
             });
             
             self.version.fetch_add(1, Ordering::Release);
@@ -371,8 +323,8 @@ impl PositionManager {
             // 3. 检查是否有待处理的同方向订单
             let has_pending = strategy_pos.pending_orders.iter().any(|order| {
                 !order.is_expired() &&
-                matches!(order.status, OrderStatus::Pending | OrderStatus::Submitted) &&
-                order.side == side
+                matches!(order.internal.status, OrderStatus::Pending | OrderStatus::Submitted) &&
+                order.internal.side == side
             });
             
             !has_pending
